@@ -15,8 +15,31 @@ MATE_BOUND = MATE - 1000  # anything above this is a forced mate
 INF = MATE + 1
 
 
+# Transposition-table bound types: the stored score is exact, a lower bound (search failed high),
+# or an upper bound (no move raised alpha).
+EXACT, LOWER, UPPER = 0, 1, 2
+TT_MAX_ENTRIES = 300_000  # ~100 MB of Python tuples; the table is cleared when full
+
+
 class Timeout(Exception):
   pass
+
+
+def _to_tt(score, ply):
+  """Mate scores are stored relative to the node, not the root, so they stay right when reached via another path."""
+  if score > MATE_BOUND:
+    return score + ply
+  if score < -MATE_BOUND:
+    return score - ply
+  return score
+
+
+def _from_tt(score, ply):
+  if score > MATE_BOUND:
+    return score - ply
+  if score < -MATE_BOUND:
+    return score + ply
+  return score
 
 
 def mate_in(score):
@@ -29,10 +52,13 @@ def mate_in(score):
 
 
 class Searcher:
-  def __init__(self):
+  def __init__(self, use_tt=True):
     self.nodes = 0
     self.deadline = None
     self.stop = False
+    self.use_tt = use_tt
+    # position key -> (depth, score, bound, best_move); kept between moves of a game
+    self.tt = {}
 
   def search(self, board, time_limit=None, max_depth=64, info=None):
     """Return (best_move, score, depth) for `board`.
@@ -88,6 +114,18 @@ class Searcher:
     if depth <= 0:
       return self._leaf(board, alpha, beta, ply)
 
+    key = None
+    if self.use_tt:
+      # python-chess's own position key (pieces, side to move, castling, en passant); pinned in requirements.txt
+      key = board._transposition_key()
+      entry = self.tt.get(key)
+      if entry is not None and entry[0] >= depth:
+        score, bound = _from_tt(entry[1], ply), entry[2]
+        if bound == EXACT or (bound == LOWER and score >= beta) or (bound == UPPER and score <= alpha):
+          return score
+
+    alpha_orig = alpha
+    best_move = None
     any_move = False
     for move in board.legal_moves:
       any_move = True
@@ -97,13 +135,24 @@ class Searcher:
       finally:
         board.pop()
       if score >= beta:
+        self._store(key, depth, beta, LOWER, move, ply)
         return beta
       if score > alpha:
-        alpha = score
+        alpha, best_move = score, move
 
     if not any_move:
       return -(MATE - ply) if board.is_check() else 0
+    self._store(key, depth, alpha, EXACT if alpha > alpha_orig else UPPER, best_move, ply)
     return alpha
+
+  def _store(self, key, depth, score, bound, move, ply):
+    if key is None:
+      return
+    if len(self.tt) >= TT_MAX_ENTRIES:
+      self.tt.clear()
+    old = self.tt.get(key)
+    if old is None or depth >= old[0]:
+      self.tt[key] = (depth, _to_tt(score, ply), bound, move)
 
   def _leaf(self, board, alpha, beta, ply):
     return self._quiesce(board, alpha, beta, ply)
