@@ -11,10 +11,11 @@ per=$((per - per % 2))
 out=runs/$name
 mkdir -p "$out"
 pids=()
+PYTHON=${PYTHON:-.venv/bin/python}
 for ((k = 0; k < shards; k++)); do
-  .venv/bin/python tools/match.py "$a" "$b" "$per" --start-game $((k * per)) --pgn "$out/shard$k.pgn" "$@" \
+  "$PYTHON" tools/match.py "$a" "$b" "$per" --start-game $((k * per)) --pgn "$out/shard$k.pgn" "$@" \
     > "$out/shard$k.log" 2>&1 &
   pids+=($!)
 done
 wait "${pids[@]}"
-.venv/bin/python tools/summarize.py "$out"/shard*.log | tee "$out/summary.txt"
+"$PYTHON" tools/summarize.py "$out"/shard*.log | tee "$out/summary.txt"
