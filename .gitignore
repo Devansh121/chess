@@ -12,3 +12,4 @@ runs/
 nets/*.pt
 nets/*.npz
 cpp/build/
+cpp/build-san/
