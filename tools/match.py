@@ -8,6 +8,8 @@ engines:
   sf<ELO>      Stockfish with UCI_LimitStrength at that Elo (1320..3190)
   tc-nn1       twitchchess Part 1: value net, 1 ply, no search
   tc-classic   twitchchess master: material + mobility, minimax
+  ours         this repo's engine over UCI (python -m engine.uci)
+  ours:PATH    the engine in another checkout, e.g. a git worktree of an older commit
 
 env:
   STOCKFISH    path to the Stockfish binary (default ~/.local/share/stockfish/stockfish-17.1)
@@ -30,6 +32,7 @@ import numpy as np
 
 STOCKFISH = os.environ.get("STOCKFISH", os.path.expanduser("~/.local/share/stockfish/stockfish-17.1"))
 TWITCHCHESS = os.environ.get("TWITCHCHESS", "")
+REPO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 
 
 class Random:
@@ -45,6 +48,20 @@ class Stockfish:
     self.limit = chess.engine.Limit(time=movetime)
     self.engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH)
     self.engine.configure({"UCI_LimitStrength": True, "UCI_Elo": elo, "Threads": 1, "Hash": 16})
+
+  def move(self, board):
+    return self.engine.play(board, self.limit).move
+
+  def close(self):
+    self.engine.quit()
+
+
+class Ours:
+  """Our engine as a UCI subprocess, so two versions (different checkouts) can play each other."""
+
+  def __init__(self, path, movetime):
+    self.limit = chess.engine.Limit(time=movetime)
+    self.engine = chess.engine.SimpleEngine.popen_uci([sys.executable, "-m", "engine.uci"], cwd=path)
 
   def move(self, board):
     return self.engine.play(board, self.limit).move
@@ -119,7 +136,9 @@ class TwitchchessClassic:
     pass
 
 
-def make(name, movetime):
+def make(name, movetime, our_time):
+  if name == "ours" or name.startswith("ours:"):
+    return Ours(os.path.abspath(name[5:] or REPO), our_time)
   if name == "random":
     return Random()
   if name.startswith("sf"):
@@ -154,10 +173,11 @@ def main():
   ap.add_argument("games", type=int)
   ap.add_argument("--pgn")
   ap.add_argument("--movetime", type=float, default=0.1, help="Stockfish seconds per move")
+  ap.add_argument("--our-time", type=float, default=0.5, help="our engine's seconds per move")
   args = ap.parse_args()
   pgn = os.path.abspath(args.pgn) if args.pgn else None
 
-  a, b = make(args.a, args.movetime), make(args.b, args.movetime)
+  a, b = make(args.a, args.movetime, args.our_time), make(args.b, args.movetime, args.our_time)
   wins = draws = losses = 0
   start = time.time()
   for i in range(args.games):
