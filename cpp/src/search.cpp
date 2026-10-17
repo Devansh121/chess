@@ -361,7 +361,7 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
   // ply shallower; the result fills in a hash move for when this position comes back deeper.
   if (hash_move == NO_MOVE && depth >= 4) depth--;
   int static_eval = in_check ? -INF : evaluate(pos, ply);
-  // "Improving": better than this side's eval two plies ago. Prune less when improving, reduce more when not.
+  // "Improving": better than this side's eval two plies ago, so reverse futility pruning is more cautious.
   if (ply < ACC_STACK) eval_stack_[ply] = static_eval;
   bool improving = !in_check && ply >= 2 && eval_stack_[ply - 2] != -INF && static_eval > eval_stack_[ply - 2];
 
@@ -411,7 +411,6 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
     if (searched >= 3 && depth >= 3 && quiet && !killer && !in_check && !gives_check) {
       int r = lmr_table[std::min(depth, 63)][std::min(searched, 63)];
       if (pv_node) r = std::max(0, r - 1);
-      if (!improving) r++;
       int reduced = std::max(1, depth - 1 - r);
       score = -negamax(next, reduced, -alpha - 1, -alpha, ply + 1);
       if (score > alpha && reduced < depth - 1 && !aborted_) score = pvs(next, depth - 1, alpha, beta, ply + 1, false);
