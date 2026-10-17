@@ -25,7 +25,7 @@ import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from nn.features import CP_CLIP, CP_SCALE  # noqa: E402
-from nn.model import ValueNet, to_model_input  # noqa: E402
+from nn.model import ARCHS, to_model_input  # noqa: E402
 
 DECIDED_WEIGHT = 0.1  # loss weight for decided positions with --decided weight
 
@@ -88,7 +88,9 @@ def evaluate(model, shards, device, batch_size, cp_scale=CP_SCALE):
 def main():
   ap = argparse.ArgumentParser()
   ap.add_argument("name")
-  ap.add_argument("--data", default="data/processed")
+  ap.add_argument(
+    "--data", action="append", help="shard directory; repeat to train on several (validation: the first only)"
+  )
   ap.add_argument("--out", default="nets")
   ap.add_argument("--shards", type=int, default=0, help="train on the first K shards only (0 = all)")
   ap.add_argument("--positions", type=int, default=0, help="training positions per epoch (0 = all)")
@@ -98,20 +100,22 @@ def main():
   ap.add_argument("--decided", choices=["keep", "weight", "drop"], default="keep")
   ap.add_argument("--cp-scale", type=float, default=CP_SCALE, help="target = 1 / (1 + 10^(-cp / scale))")
   ap.add_argument("--seed", type=int, default=0)
+  ap.add_argument("--arch", choices=sorted(ARCHS), default="v1")
   args = ap.parse_args()
+  args.data = args.data or ["data/processed"]
 
   random.seed(args.seed)
   np.random.seed(args.seed)
   torch.manual_seed(args.seed)
   device = "cuda" if torch.cuda.is_available() else "cpu"
-  train_shards = sorted(glob.glob(os.path.join(args.data, "train_*.npz")))
+  train_shards = [s for d in args.data for s in sorted(glob.glob(os.path.join(d, "train_*.npz")))]
   if args.shards:
     train_shards = train_shards[: args.shards]
-  val_shards = sorted(glob.glob(os.path.join(args.data, "val_*.npz")))
+  val_shards = sorted(glob.glob(os.path.join(args.data[0], "val_*.npz")))
   if not train_shards or not val_shards:
     sys.exit(f"no shards in {args.data}; run scripts/build_dataset.py first")
 
-  model = ValueNet().to(device)
+  model = ARCHS[args.arch]().to(device)
   opt = torch.optim.Adam(model.parameters(), lr=args.lr)
   sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda e: 0.5 * (1 + math.cos(math.pi * e / args.epochs)))
   os.makedirs(args.out, exist_ok=True)

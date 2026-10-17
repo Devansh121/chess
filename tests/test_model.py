@@ -35,7 +35,8 @@ def test_output_shape_and_param_count():
   assert 200_000 < sum(p.numel() for p in model.parameters()) < 210_000
 
 
-def test_training_lowers_loss_on_a_tiny_dataset(tmp_path):
+@pytest.mark.parametrize("arch", ["v1", "v2"])
+def test_training_lowers_loss_on_a_tiny_dataset(tmp_path, arch):
   # Synthetic task: the target depends on whether feature 0 is present, so a working loop must learn it.
   rng = np.random.default_rng(0)
   for name, n in (("train_000", 4000), ("val_000", 500)):
@@ -61,6 +62,8 @@ def test_training_lowers_loss_on_a_tiny_dataset(tmp_path):
       "256",
       "--lr",
       "3e-3",
+      "--arch",
+      arch,
     ],
     check=True,
     cwd=REPO,
@@ -70,3 +73,34 @@ def test_training_lowers_loss_on_a_tiny_dataset(tmp_path):
   assert (out / "tiny.pt").exists()
   assert log["epochs"][-1]["val_mse"] < log["epochs"][0]["val_mse"]
   assert log["best_val_mse"] < 0.02  # 0.16 if it learned nothing
+
+
+@pytest.mark.parametrize(
+  "fen",
+  [
+    "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+    "r1bq1rk1/pp2bppp/2n1pn2/3p4/2PP4/2N1PN2/PP1B1PPP/R2QKB1R w KQ - 0 8",
+    "7r/1p3k2/p1bPR3/5p2/2B2P1p/8/PP4P1/3K4 b - - 0 1",
+  ],
+)
+def test_other_perspective_is_the_other_sides_view(fen):
+  from nn.model import other_perspective
+
+  fields = fen.split()
+  flipped = " ".join([fields[0], "b" if fields[1] == "w" else "w"] + fields[2:])
+  x = to_model_input(np.array([pack(fen_features(fen))]))
+  other = other_perspective(x)[0]
+  got = sorted(int(i) for i in other if i != NUM_FEATURES)
+  assert got == sorted(fen_features(flipped))
+
+
+def test_v2_shapes_and_padding():
+  from nn.model import ValueNetV2
+
+  model = ValueNetV2()
+  a = to_model_input(np.array([pack([5, 70, 700])]))
+  b = torch.tensor([[5, 70, 700]])
+  assert torch.allclose(model(a), model(b))
+  assert model(a).shape == (1,)
+  # 769 x 256 shared input weights + 256 biases + 512 x 32 + 32 + 32 + 1 = 213,569
+  assert sum(p.numel() for p in model.parameters()) == 213_569
