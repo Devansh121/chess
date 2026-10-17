@@ -162,3 +162,41 @@ def test_tt_finds_the_same_mate_in_two():
   s.search(board, max_depth=4)
   _, score, _ = s.search(board, max_depth=4)  # second search answers mostly from the table
   assert mate_in(score) == 2
+
+
+# --- move ordering ---
+
+
+def test_ordering_hash_move_then_captures_then_killers():
+  # White can capture the d5 queen (Rxd5) or the b5 pawn (Bxb5); quiet moves otherwise.
+  board = chess.Board("4k3/8/8/1p1q4/8/8/8/3RKB2 w - - 0 1")
+  s = Searcher()
+  hash_move = chess.Move.from_uci("e1f2")
+  killer = chess.Move.from_uci("f1e2")
+  s.killers[3] = [killer, None]
+  moves = s._ordered(board, hash_move, 3)
+  assert moves[0] == hash_move
+  assert moves[1] == chess.Move.from_uci("d1d5")  # takes the queen: most valuable victim
+  assert moves[2] == chess.Move.from_uci("f1b5")  # takes a pawn
+  assert moves[3] == killer
+  assert sorted(moves, key=str) == sorted(board.legal_moves, key=str)
+
+
+def test_quiet_cutoff_move_becomes_a_killer():
+  s = Searcher()
+  s.search(chess.Board(), max_depth=4)
+  assert any(k is not None and not chess.Board().is_capture(k) for pair in s.killers for k in pair)
+
+
+def test_ordering_cuts_nodes_without_changing_the_answer():
+  fen = "r1bq1rk1/pp2bppp/2n1pn2/3p4/2PP4/2N1PN2/PP1B1PPP/R2QKB1R w KQ - 0 8"
+  ordered = Searcher()
+  move, score, _ = ordered.search(chess.Board(fen), max_depth=3)
+  unordered = Searcher()
+  unordered._ordered = lambda board, hash_move, ply: list(board.legal_moves)
+  move2, score2, _ = unordered.search(chess.Board(fen), max_depth=3)
+  # Same minimax value; the chosen move can differ when several moves tie on that value.
+  assert score == score2
+  board = chess.Board(fen)
+  assert move in board.legal_moves and move2 in board.legal_moves
+  assert ordered.nodes < unordered.nodes / 2
