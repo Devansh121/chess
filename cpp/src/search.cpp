@@ -175,6 +175,9 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
     return 0;
   }
   if (is_draw(pos, ply)) return 0;
+  // Check extension: checks are forcing and have few replies, so look one ply further.
+  bool in_check = pos.in_check();
+  if (in_check && ply < MAX_PLY - 1) depth++;
   if (depth <= 0) return quiesce(pos, alpha, beta, ply);
 
   Move hash_move = NO_MOVE;
@@ -191,7 +194,7 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
   // certainly would too. Skipped in check, in PV nodes, right after another null move, and with only
   // pawns left (zugzwang is common there).
   bool pv_node = beta - alpha > 1;
-  if (allow_null && !pv_node && depth >= 3 && !pos.in_check() && pos.has_non_pawn_material(pos.side) &&
+  if (allow_null && !pv_node && depth >= 3 && !in_check && pos.has_non_pawn_material(pos.side) &&
       eval::evaluate(pos) >= beta) {
     int r = 2 + depth / 6;
     Position next = pos.make_null();
@@ -208,7 +211,6 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
   int alpha_orig = alpha;
   Move best = NO_MOVE;
   int searched = 0;
-  bool in_check = pos.in_check();
   Move quiets_tried[MAX_MOVES];
   int n_quiets = 0;
   for (Move m : list) {
@@ -251,7 +253,7 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
       best = m;
     }
   }
-  if (searched == 0) return pos.in_check() ? -(MATE - ply) : 0;
+  if (searched == 0) return in_check ? -(MATE - ply) : 0;
   tt_.store(pos.hash, best, to_tt(alpha, ply), depth, alpha > alpha_orig ? BOUND_EXACT : BOUND_UPPER);
   return alpha;
 }
