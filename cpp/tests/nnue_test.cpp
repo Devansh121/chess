@@ -1,0 +1,129 @@
+// Network evaluation tests with a deterministic random network (written to a temp file and loaded through
+// the normal loader): incremental accumulator updates equal a full refresh at every node of small move
+// trees (covering captures, castling, en passant and promotion), and colour-flipped positions score the same.
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <fstream>
+#include <string>
+#include <vector>
+
+#include "../src/movegen.h"
+#include "../src/nnue.h"
+
+namespace {
+
+int failures = 0;
+void check(bool ok, const std::string& what) {
+  std::printf("%s %s\n", ok ? "ok  " : "FAIL", what.c_str());
+  if (!ok) failures++;
+}
+
+std::string write_random_net(int arch, int h1, int h2) {
+  std::string path = "nnue_test_arch" + std::to_string(arch) + ".nnue";
+  std::ofstream out(path, std::ios::binary);
+  uint64_t s = 12345 + arch;
+  auto rnd = [&s](float scale) {
+    s ^= s << 13;
+    s ^= s >> 7;
+    s ^= s << 17;
+    return scale * (float(s % 20001) / 10000.0f - 1.0f);
+  };
+  uint32_t header[5] = {1, uint32_t(arch), uint32_t(nnue::NUM_FEATURES + 1), uint32_t(h1), uint32_t(h2)};
+  float cp_scale = 400.0f;
+  out.write("CHNN", 4);
+  out.write(reinterpret_cast<char*>(header), sizeof(header));
+  out.write(reinterpret_cast<char*>(&cp_scale), sizeof(cp_scale));
+  auto put = [&](size_t n, float scale) {
+    for (size_t i = 0; i < n; i++) {
+      float v = rnd(scale);
+      out.write(reinterpret_cast<char*>(&v), sizeof(v));
+    }
+  };
+  put(size_t(nnue::NUM_FEATURES + 1) * h1, 0.05f);  // w1
+  put(h1, 0.1f);                                    // b1
+  put(size_t(h2) * arch * h1, 0.1f);                // w2
+  put(h2, 0.1f);                                    // b2
+  put(h2, 0.5f);                                    // w3
+  put(1, 0.1f);                                     // b3
+  return path;
+}
+
+float max_diff(const nnue::Network& net, const nnue::Accumulator& a, const nnue::Accumulator& b) {
+  float d = 0;
+  for (int p = 0; p < 2; p++)
+    for (int i = 0; i < net.hidden1; i++) d = std::max(d, std::fabs(a.v[p][i] - b.v[p][i]));
+  return d;
+}
+
+// Walk the legal move tree; at every node compare the incrementally updated accumulator with a refresh.
+float walk(const nnue::Network& net, const Position& pos, const nnue::Accumulator& acc, int depth, long& nodes) {
+  nnue::Accumulator fresh;
+  nnue::refresh(net, pos, fresh);
+  float worst = max_diff(net, acc, fresh);
+  nodes++;
+  if (depth == 0) return worst;
+  MoveList list;
+  generate_legal(pos, list);
+  for (Move m : list) {
+    Position next = pos.make(m);
+    nnue::Accumulator child;
+    nnue::update(net, pos, next, acc, child);
+    worst = std::max(worst, walk(net, next, child, depth - 1, nodes));
+  }
+  return worst;
+}
+
+Position colour_flipped(const Position& p) {
+  std::string fen = p.fen();
+  std::string placement = fen.substr(0, fen.find(' '));
+  std::string ranks[8], out;
+  int r = 0;
+  for (char c : placement) {
+    if (c == '/') r++;
+    else ranks[r] += std::isupper(c) ? char(std::tolower(c)) : char(std::toupper(c));
+  }
+  for (int i = 7; i >= 0; i--) out += ranks[i] + (i ? "/" : "");
+  Position m;
+  m.set_fen(out + (p.side == WHITE ? " b" : " w") + " - - 0 1");
+  return m;
+}
+
+}  // namespace
+
+int main() {
+  Position::init();
+  const char* fens[] = {
+      "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",  // castling, captures
+      "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",                             // en passant
+      "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",      // promotions
+  };
+  for (int arch = 1; arch <= 2; arch++) {
+    nnue::Network net;
+    std::string err = net.load(write_random_net(arch, 64, 16));
+    check(err.empty(), "load arch " + std::to_string(arch) + (err.empty() ? "" : ": " + err));
+    if (!err.empty()) continue;
+    for (const char* fen : fens) {
+      Position pos;
+      pos.set_fen(fen);
+      nnue::Accumulator acc;
+      nnue::refresh(net, pos, acc);
+      long nodes = 0;
+      float worst = walk(net, pos, acc, 3, nodes);
+      check(worst < 1e-3f, "arch " + std::to_string(arch) + " incremental == refresh over " + std::to_string(nodes) +
+                               " nodes (max diff " + std::to_string(worst) + "): " + fen);
+      Position flipped = colour_flipped(pos);
+      nnue::Accumulator a2;
+      nnue::refresh(net, flipped, a2);
+      float l1 = nnue::logit(net, acc, pos.side), l2 = nnue::logit(net, a2, flipped.side);
+      check(std::fabs(l1 - l2) < 1e-4f, "arch " + std::to_string(arch) + " colour-flipped position scores the same");
+    }
+  }
+  if (failures) {
+    std::printf("%d failure(s)\n", failures);
+    return 1;
+  }
+  std::printf("all nnue tests passed\n");
+  return 0;
+}

@@ -127,7 +127,30 @@ void Searcher::order_moves(const Position& pos, Move* moves, int n, Move hash_mo
   }
 }
 
+int Searcher::evaluate(const Position& pos, int ply) {
+  if (!net_) return eval::evaluate(pos);
+  if (ply >= ACC_STACK) {
+    nnue::Accumulator scratch;
+    nnue::refresh(*net_, pos, scratch);
+    return nnue::evaluate(*net_, scratch, pos.side);
+  }
+  // Walk back to the nearest node on the current path whose accumulator is up to date, then apply the
+  // move differences forward. Positions with no evaluation never pay for an update.
+  int k = ply;
+  while (k > 0 && !acc_valid_[k]) k--;
+  if (!acc_valid_[k]) {
+    nnue::refresh(*net_, *pos_at_[k], acc_[k]);
+    acc_valid_[k] = true;
+  }
+  for (int j = k + 1; j <= ply; j++) {
+    nnue::update(*net_, *pos_at_[j - 1], *pos_at_[j], acc_[j - 1], acc_[j]);
+    acc_valid_[j] = true;
+  }
+  return nnue::evaluate(*net_, acc_[ply], pos.side);
+}
+
 int Searcher::quiesce(const Position& pos, int alpha, int beta, int ply) {
+  enter(pos, ply);
   nodes_++;
   if (time_up()) {
     aborted_ = true;
@@ -138,7 +161,7 @@ int Searcher::quiesce(const Position& pos, int alpha, int beta, int ply) {
   if (in_check) {
     generate(pos, list);  // all evasions; no standing pat in check
   } else {
-    int stand_pat = eval::evaluate(pos);
+    int stand_pat = evaluate(pos, ply);
     if (stand_pat >= beta) return beta;
     if (stand_pat > alpha) alpha = stand_pat;
     generate(pos, list, true);
@@ -172,6 +195,7 @@ int Searcher::pvs(const Position& next, int depth, int alpha, int beta, int ply,
 }
 
 int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int ply, bool allow_null) {
+  enter(pos, ply);
   nodes_++;
   if (time_up()) {
     aborted_ = true;
@@ -197,7 +221,7 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
   // certainly would too. Skipped in check, in PV nodes, right after another null move, and with only
   // pawns left (zugzwang is common there).
   bool pv_node = beta - alpha > 1;
-  int static_eval = in_check ? -INF : eval::evaluate(pos);
+  int static_eval = in_check ? -INF : evaluate(pos, ply);
 
   // Reverse futility pruning: close to the leaves, if the static eval beats beta by a margin that
   // grows with the remaining depth, the opponent is unlikely to recover in so few moves.
@@ -326,6 +350,7 @@ SearchResult Searcher::search(const Position& root, const std::vector<U64>& hist
   std::memset(killers_, 0, sizeof(killers_));
   stack_ = history;
   stack_.push_back(root.hash);
+  enter(root, 0);
 
   SearchResult result;
   MoveList legal;

@@ -7,6 +7,7 @@
 #include <functional>
 #include <vector>
 
+#include "nnue.h"
 #include "position.h"
 #include "tt.h"
 
@@ -38,6 +39,8 @@ struct SearchResult {
 class Searcher {
  public:
   explicit Searcher(size_t hash_mb = 64);
+  // Evaluate with this network instead of the hand-written evaluation (nullptr: hand-written).
+  void set_network(const nnue::Network* net) { net_ = net; }
   void new_game();
   void resize_hash(size_t mb) { tt_.resize(mb); }
 
@@ -56,6 +59,22 @@ class Searcher {
   bool time_up();
   void order_moves(const Position& pos, Move* moves, int n, Move hash_move, int ply) const;
   std::vector<Move> extract_pv(const Position& pos, Move first, int max_len) const;
+
+  // Static evaluation of `pos` at `ply` (network accumulators are brought up to date lazily).
+  int evaluate(const Position& pos, int ply);
+  // Called on entering every node: remembers the position for incremental accumulator updates.
+  void enter(const Position& pos, int ply) {
+    if (net_ && ply < ACC_STACK) {
+      pos_at_[ply] = &pos;
+      acc_valid_[ply] = false;
+    }
+  }
+
+  static constexpr int ACC_STACK = MAX_PLY + 64;  // quiescence can go past MAX_PLY
+  const nnue::Network* net_ = nullptr;
+  std::vector<nnue::Accumulator> acc_ = std::vector<nnue::Accumulator>(ACC_STACK);
+  const Position* pos_at_[ACC_STACK] = {};
+  bool acc_valid_[ACC_STACK] = {};
 
   TT tt_;
   Move killers_[MAX_PLY][2];

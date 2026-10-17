@@ -28,6 +28,7 @@ add_library(engine_core STATIC
   src/tt.cpp
   src/search.cpp
   src/see.cpp
+  src/nnue.cpp
 )
 target_include_directories(engine_core PUBLIC src)
 
@@ -40,6 +41,10 @@ target_link_libraries(perft_test engine_core)
 add_executable(search_test tests/search_test.cpp)
 target_link_libraries(search_test engine_core)
 
+add_executable(nnue_test tests/nnue_test.cpp)
+target_link_libraries(nnue_test engine_core)
+
 enable_testing()
 add_test(NAME perft COMMAND perft_test)
 add_test(NAME search COMMAND search_test)
+add_test(NAME nnue COMMAND nnue_test)
