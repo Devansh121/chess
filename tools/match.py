@@ -14,6 +14,7 @@ engines:
   tc-classic   twitchchess master: material + mobility, minimax
   ours         this repo's engine over UCI (python -m engine.uci)
   ours:PATH    the engine in another checkout, e.g. a git worktree of an older commit
+  oursnn:FILE  this repo's engine with the value network in FILE (.npz from scripts/export_net.py)
 
 env:
   STOCKFISH    path to the Stockfish binary (default ~/.local/share/stockfish/stockfish-17.1)
@@ -63,9 +64,11 @@ class Stockfish:
 class Ours:
   """Our engine as a UCI subprocess, so two versions (different checkouts) can play each other."""
 
-  def __init__(self, path, movetime):
+  def __init__(self, path, movetime, options=None):
     self.limit = chess.engine.Limit(time=movetime)
     self.engine = chess.engine.SimpleEngine.popen_uci([sys.executable, "-m", "engine.uci"], cwd=path)
+    if options:
+      self.engine.configure(options)
 
   def move(self, board):
     return self.engine.play(board, self.limit).move
@@ -143,6 +146,8 @@ class TwitchchessClassic:
 def make(name, movetime, our_time):
   if name == "ours" or name.startswith("ours:"):
     return Ours(os.path.abspath(name[5:] or REPO), our_time)
+  if name.startswith("oursnn:"):
+    return Ours(REPO, our_time, {"EvalFile": os.path.abspath(name[7:])})
   if name == "random":
     return Random()
   if name.startswith("sf"):

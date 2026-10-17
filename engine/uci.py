@@ -68,7 +68,17 @@ def format_score(score):
 
 def main():
   board = chess.Board()
-  searcher = Searcher()
+  eval_file = ""
+
+  def new_searcher():
+    """A fresh searcher using the hand-written eval, or the network in EvalFile if one is set."""
+    if not eval_file:
+      return Searcher()
+    from engine.nn_eval import NetEvaluator
+
+    return Searcher(evaluate=NetEvaluator(eval_file))
+
+  searcher = new_searcher()
   thread = None
 
   def go(board, args):
@@ -92,11 +102,17 @@ def main():
     if cmd == "uci":
       send(f"id name {NAME}")
       send(f"id author {AUTHOR}")
+      send("option name EvalFile type string default <empty>")
       send("uciok")
     elif cmd == "isready":
       send("readyok")
+    elif cmd == "setoption" and len(tokens) >= 4 and tokens[2].lower() == "evalfile":
+      # setoption name EvalFile value <path>; empty or <empty> means the hand-written evaluation
+      value = " ".join(tokens[4:]) if len(tokens) > 4 and tokens[3] == "value" else ""
+      eval_file = "" if value in ("", "<empty>") else value
+      searcher = new_searcher()
     elif cmd == "ucinewgame":
-      searcher = Searcher()
+      searcher = new_searcher()
     elif cmd == "position":
       board = parse_position(tokens[1:])
     elif cmd == "go":
