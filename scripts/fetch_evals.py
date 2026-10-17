@@ -7,6 +7,9 @@ evaluation's first principal variation. Exactly one of cp / mate is set.
 usage:
   curl -s https://database.lichess.org/lichess_db_eval.jsonl.zst \
     | zstd -dc | python3 scripts/fetch_evals.py 50000000 | zstd -q -o data/evals.tsv.zst
+
+  # the next 100M positions (the first 50M are still streamed past, then skipped)
+  ... | python3 scripts/fetch_evals.py 100000000 --skip 50000000 | zstd -q -o data/evals2.tsv.zst
 """
 
 import json
@@ -14,10 +17,20 @@ import sys
 
 
 def main():
-  limit = int(sys.argv[1]) if len(sys.argv) > 1 else None
+  args = sys.argv[1:]
+  skip = 0
+  if "--skip" in args:
+    i = args.index("--skip")
+    skip = int(args[i + 1])
+    del args[i : i + 2]
+  limit = int(args[0]) if args else None
   out = sys.stdout
   n = 0
-  for line in sys.stdin:
+  for i, line in enumerate(sys.stdin):
+    if i < skip:
+      if (i + 1) % 10_000_000 == 0:
+        print(f"skipped {i + 1:,}", file=sys.stderr, flush=True)
+      continue
     rec = json.loads(line)
     best = max(rec["evals"], key=lambda e: e["depth"])
     pv = best["pvs"][0]
