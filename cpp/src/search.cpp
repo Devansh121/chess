@@ -191,6 +191,7 @@ int Searcher::quiesce(const Position& pos, int alpha, int beta, int ply) {
     if (!is_legal(pos, m)) continue;
     any_legal = true;
     Position next = pos.make(m);
+    tt_->prefetch(next.hash);
     stack_.push_back(next.hash);
     int score = -quiesce(next, -beta, -alpha, ply + 1);
     stack_.pop_back();
@@ -281,6 +282,7 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
     if (!is_legal(pos, m)) continue;
     legal++;
     Position next = pos.make(m);
+    tt_->prefetch(next.hash);
     bool quiet = !is_capture(m) && !is_promotion(m);
     bool gives_check = next.in_check();
 
@@ -343,6 +345,7 @@ int Searcher::root_search(const Position& pos, int depth, Move prev_best, Move& 
   int searched = 0;
   for (Move m : list) {
     Position next = pos.make(m);
+    tt_->prefetch(next.hash);
     stack_.push_back(next.hash);
     int score = pvs(next, depth - 1, alpha, beta, 1, searched == 0);
     searched++;
