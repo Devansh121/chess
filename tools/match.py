@@ -16,7 +16,8 @@ engines:
   ours:PATH    the engine in another checkout, e.g. a git worktree of an older commit
   oursnn:FILE  this repo's engine with the value network in FILE (.npz from scripts/export_net.py)
   uci:PATH     any UCI engine binary (e.g. cpp/build/chess-engine), given --our-time per move,
-               or --nodes per move (reproducible, independent of machine speed)
+               or --nodes per move (reproducible, independent of machine speed);
+               UCI options after '@': uci:PATH@EvalFile=nets/x.nnue,Threads=4
 
 env:
   STOCKFISH    path to the Stockfish binary (default ~/.local/share/stockfish/stockfish-17.1)
@@ -66,9 +67,15 @@ class Stockfish:
 class UciEngine:
   """Any UCI engine binary, thinking a fixed time (or a fixed number of nodes) per move."""
 
-  def __init__(self, path, movetime, nodes=0):
+  def __init__(self, spec, movetime, nodes=0):
+    path, _, opts = spec.partition("@")
     self.limit = chess.engine.Limit(nodes=nodes) if nodes else chess.engine.Limit(time=movetime)
     self.engine = chess.engine.SimpleEngine.popen_uci(os.path.abspath(path))
+    options = dict(kv.split("=", 1) for kv in opts.split(",") if kv)
+    if "EvalFile" in options:
+      options["EvalFile"] = os.path.abspath(options["EvalFile"])
+    if options:
+      self.engine.configure(options)
 
   def move(self, board, limit=None):
     return self.engine.play(board, limit or self.limit).move

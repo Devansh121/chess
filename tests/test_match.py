@@ -85,3 +85,11 @@ def test_parse_tc():
 def test_clocked_game_with_random_players():
   result, board = match.play_game(match.Random(), match.Random(), tc=(5.0, 0.0))
   assert result in ("1-0", "0-1", "1/2-1/2")
+
+
+def test_uci_engine_options_are_parsed(tmp_path):
+  # A fake 'engine' isn't needed: check the spec parsing that UciEngine relies on.
+  spec = "cpp/build/chess-engine@EvalFile=nets/x.nnue,Threads=4"
+  path, _, opts = spec.partition("@")
+  assert path == "cpp/build/chess-engine"
+  assert dict(kv.split("=", 1) for kv in opts.split(",") if kv) == {"EvalFile": "nets/x.nnue", "Threads": "4"}
