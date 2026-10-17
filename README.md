@@ -3,15 +3,14 @@
 A small chess engine. Inspired by George Hotz's
 [twitchchess](https://github.com/geohot/twitchchess) streams (2018), rebuilt from scratch.
 
-## Baseline (twitchchess, measured on an RTX 4050 laptop, CPython)
+## Baseline: twitchchess
 
-| Engine | Search | Time per move |
-|---|---|---|
-| twitchchess Part 1 (value net) | 1 ply, no search | ~0.01 s |
-| twitchchess master (material + mobility) | 3 ply full + 2 ply beam(10), ~8.5k nodes/s | 6.6 s (start), 28 s (middlegame) |
+Measured against Stockfish 17.1 at `UCI_Elo` 1320; details in [docs/baseline.md](docs/baseline.md).
 
-Estimated strength: ~600-900 (Part 1 net), ~1000-1300 (master). To be measured
-against Stockfish `UCI_LimitStrength` before anything else.
+| Engine | Search | Time per move | Estimated Elo |
+|---|---|---|---|
+| twitchchess Part 1 (value net) | 1 ply, no search | ~0.01 s | well under 1000 (0/40 vs Stockfish 1320) |
+| twitchchess master (material + mobility) | 3 ply full + 2 ply beam(10), ~8.5k nodes/s | 6.6-28 s | about 1350 (6.5/12) |
 
 ## Plan (current direction, will change)
 
