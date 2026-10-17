@@ -49,6 +49,9 @@ struct Network {
   // Loads a .nnue file written by scripts/export_net.py and quantizes it. Returns an error message,
   // empty on success (including a refusal if the weights could overflow int16).
   std::string load(const std::string& path);
+  std::string load_from_memory(const void* data, size_t size);
+  // The network built into the binary (nets/default.nnue at compile time); error if there is none.
+  std::string load_embedded();
 };
 
 struct Accumulator {

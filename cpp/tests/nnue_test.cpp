@@ -129,6 +129,30 @@ int main() {
       check(std::fabs(l1 - l2) < 1e-4f, "arch " + std::to_string(arch) + " colour-flipped position scores the same");
     }
   }
+  // The network built into the binary (nets/default.nnue), when this build has one.
+  {
+    nnue::Network net;
+    std::string err = net.load_embedded();
+    if (err == "this build has no embedded network") {
+      std::printf("skip embedded network: %s\n", err.c_str());
+    } else {
+      check(err.empty(), "embedded network loads" + (err.empty() ? std::string() : ": " + err));
+      auto eval = [&](const char* fen) {
+        Position p;
+        p.set_fen(fen);
+        nnue::Accumulator acc;
+        nnue::refresh(net, p, acc);
+        return nnue::evaluate(net, acc, p.side);
+      };
+      int start = eval("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+      int queen_up = eval("4k3/8/8/8/8/8/8/3QK3 w - - 0 1");
+      int queen_down = eval("4k3/8/8/8/8/8/8/3QK3 b - - 0 1");
+      check(std::abs(start) < 100, "embedded net: start position near equal (" + std::to_string(start) + ")");
+      check(queen_up > 500 && queen_down < -500, "embedded net: a queen up is winning (" + std::to_string(queen_up) +
+                                                     ", " + std::to_string(queen_down) + ")");
+    }
+  }
+
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;

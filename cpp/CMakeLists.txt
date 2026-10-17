@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(chess_engine CXX)
+project(chess_engine CXX ASM)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -29,8 +29,21 @@ add_library(engine_core STATIC
   src/search.cpp
   src/see.cpp
   src/nnue.cpp
+  src/embedded_net.cpp
 )
 target_include_directories(engine_core PUBLIC src)
+
+# Embed the default network (nets/default.nnue) into the binary when it exists.
+set(EMBED_NET_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../nets/default.nnue" CACHE FILEPATH "Network to embed")
+if(EXISTS "${EMBED_NET_FILE}")
+  configure_file(src/embedded_net.S.in "${CMAKE_CURRENT_BINARY_DIR}/embedded_net.S" @ONLY)
+  set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/embedded_net.S" PROPERTIES OBJECT_DEPENDS "${EMBED_NET_FILE}")
+  target_sources(engine_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/embedded_net.S")
+  target_compile_definitions(engine_core PRIVATE CHESS_EMBEDDED_NET)
+  message(STATUS "Embedding network ${EMBED_NET_FILE}")
+else()
+  message(STATUS "No network at ${EMBED_NET_FILE}; building without an embedded network")
+endif()
 
 add_executable(chess-engine src/main.cpp)
 target_link_libraries(chess-engine engine_core pthread)
