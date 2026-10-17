@@ -1,0 +1,5 @@
+# Compile for the build machine's CPU, like the C++ build's default (-march=native). Without it the
+# generic x86-64 target has no hardware popcnt, which costs ~20% on bitboard code. Override with
+# RUSTFLAGS for a portable binary.
+[build]
+rustflags = ["-C", "target-cpu=native"]
