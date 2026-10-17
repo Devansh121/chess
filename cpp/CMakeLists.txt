@@ -19,11 +19,21 @@ add_library(engine_core STATIC
   src/bitboard.cpp
   src/position.cpp
   src/movegen.cpp
+  src/eval.cpp
+  src/tt.cpp
+  src/search.cpp
 )
 target_include_directories(engine_core PUBLIC src)
+
+add_executable(chess-engine src/main.cpp)
+target_link_libraries(chess-engine engine_core pthread)
 
 add_executable(perft_test tests/perft_test.cpp)
 target_link_libraries(perft_test engine_core)
 
+add_executable(search_test tests/search_test.cpp)
+target_link_libraries(search_test engine_core)
+
 enable_testing()
 add_test(NAME perft COMMAND perft_test)
+add_test(NAME search COMMAND search_test)

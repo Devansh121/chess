@@ -15,6 +15,7 @@ engines:
   ours         this repo's engine over UCI (python -m engine.uci)
   ours:PATH    the engine in another checkout, e.g. a git worktree of an older commit
   oursnn:FILE  this repo's engine with the value network in FILE (.npz from scripts/export_net.py)
+  uci:PATH     any UCI engine binary (e.g. cpp/build/chess-engine), given --our-time per move
 
 env:
   STOCKFISH    path to the Stockfish binary (default ~/.local/share/stockfish/stockfish-17.1)
@@ -53,6 +54,20 @@ class Stockfish:
     self.limit = chess.engine.Limit(time=movetime)
     self.engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH)
     self.engine.configure({"UCI_LimitStrength": True, "UCI_Elo": elo, "Threads": 1, "Hash": 16})
+
+  def move(self, board):
+    return self.engine.play(board, self.limit).move
+
+  def close(self):
+    self.engine.quit()
+
+
+class UciEngine:
+  """Any UCI engine binary, thinking a fixed time per move."""
+
+  def __init__(self, path, movetime):
+    self.limit = chess.engine.Limit(time=movetime)
+    self.engine = chess.engine.SimpleEngine.popen_uci(os.path.abspath(path))
 
   def move(self, board):
     return self.engine.play(board, self.limit).move
@@ -146,6 +161,8 @@ class TwitchchessClassic:
 def make(name, movetime, our_time):
   if name == "ours" or name.startswith("ours:"):
     return Ours(os.path.abspath(name[5:] or REPO), our_time)
+  if name.startswith("uci:"):
+    return UciEngine(name[4:], our_time)
   if name.startswith("oursnn:"):
     return Ours(REPO, our_time, {"EvalFile": os.path.abspath(name[7:])})
   if name == "random":
