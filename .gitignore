@@ -11,3 +11,4 @@ runs/
 # Weights stay out unless a net becomes the engine default; run logs (nets/*.json) are committed.
 nets/*.pt
 nets/*.npz
+cpp/build/
