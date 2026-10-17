@@ -148,7 +148,7 @@ int Searcher::pvs(const Position& next, int depth, int alpha, int beta, int ply,
   return score;
 }
 
-int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int ply) {
+int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int ply, bool allow_null) {
   nodes_++;
   if (time_up()) {
     aborted_ = true;
@@ -165,6 +165,21 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
       if (e->bound == BOUND_EXACT || (e->bound == BOUND_LOWER && s >= beta) || (e->bound == BOUND_UPPER && s <= alpha))
         return s;
     }
+  }
+
+  // Null-move pruning: if passing the turn still holds beta after a reduced search, a real move almost
+  // certainly would too. Skipped in check, in PV nodes, right after another null move, and with only
+  // pawns left (zugzwang is common there).
+  bool pv_node = beta - alpha > 1;
+  if (allow_null && !pv_node && depth >= 3 && !pos.in_check() && pos.has_non_pawn_material(pos.side) &&
+      eval::evaluate(pos) >= beta) {
+    int r = 2 + depth / 6;
+    Position next = pos.make_null();
+    stack_.push_back(next.hash);
+    int score = -negamax(next, depth - 1 - r, -beta, -beta + 1, ply + 1, false);
+    stack_.pop_back();
+    if (aborted_) return 0;
+    if (score >= beta) return beta;
   }
 
   MoveList list;

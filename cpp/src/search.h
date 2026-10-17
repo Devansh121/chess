@@ -48,7 +48,7 @@ class Searcher {
   std::atomic<bool> stop{false};
 
  private:
-  int negamax(const Position& pos, int depth, int alpha, int beta, int ply);
+  int negamax(const Position& pos, int depth, int alpha, int beta, int ply, bool allow_null = true);
   int pvs(const Position& next, int depth, int alpha, int beta, int ply, bool first);
   int quiesce(const Position& pos, int alpha, int beta, int ply);
   int root_search(const Position& pos, int depth, Move prev_best, Move& best);
