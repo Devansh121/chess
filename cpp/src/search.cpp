@@ -217,19 +217,28 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
   order_moves(pos, list.moves, list.size, hash_move, ply);
   int alpha_orig = alpha;
   Move best = NO_MOVE;
-  int searched = 0;
+  int searched = 0, legal = 0;
   Move quiets_tried[MAX_MOVES];
   int n_quiets = 0;
   for (Move m : list) {
     if (!is_legal(pos, m)) continue;
+    legal++;
     Position next = pos.make(m);
+    bool quiet = !is_capture(m) && !is_promotion(m);
+    bool gives_check = next.in_check();
+
+    // Futility pruning: near the leaves, a quiet move that can't lift the static eval to alpha even
+    // with a generous margin is skipped. The first move is always searched.
+    if (!pv_node && !in_check && depth <= 3 && searched > 0 && quiet && !gives_check &&
+        static_eval + 100 + 100 * depth <= alpha)
+      continue;
+
     stack_.push_back(next.hash);
     int score;
     // Late-move reductions: quiet moves sorted late are rarely best, so search them shallower first
     // with a zero window; if one beats alpha anyway, it gets the normal search.
-    bool quiet = !is_capture(m) && !is_promotion(m);
     bool killer = ply < MAX_PLY && (m == killers_[ply][0] || m == killers_[ply][1]);
-    if (searched >= 3 && depth >= 3 && quiet && !killer && !in_check && !next.in_check()) {
+    if (searched >= 3 && depth >= 3 && quiet && !killer && !in_check && !gives_check) {
       int r = lmr_table[std::min(depth, 63)][std::min(searched, 63)];
       if (pv_node) r = std::max(0, r - 1);
       int reduced = std::max(1, depth - 1 - r);
@@ -260,7 +269,8 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
       best = m;
     }
   }
-  if (searched == 0) return in_check ? -(MATE - ply) : 0;
+  if (legal == 0) return in_check ? -(MATE - ply) : 0;
+  if (searched == 0) return alpha;  // every legal move was pruned: a fail low, not a mate or stalemate
   tt_.store(pos.hash, best, to_tt(alpha, ply), depth, alpha > alpha_orig ? BOUND_EXACT : BOUND_UPPER);
   return alpha;
 }
