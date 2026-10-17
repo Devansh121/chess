@@ -47,6 +47,117 @@ bool insufficient_material(const Position& pos) {
   return minors <= 1;
 }
 
+
+// Hands out a node's moves in stages, doing each stage's work only if the search gets that far:
+// hash move (no scoring at all), captures by MVV-LVA with SEE computed only for the capture about to be
+// returned (losers set aside), quiet queen promotions, killers, the set-aside losing captures, then quiet
+// moves scored by history only on reaching them. The best remaining move of a stage is picked each call
+// instead of sorting everything up front, since most nodes cut off after one or two moves.
+class MovePicker {
+ public:
+  MovePicker(const Position& pos, const MoveList& list, Move hash_move, const Move* killers, const int (*history)[64])
+      : pos_(pos), list_(list), hash_(hash_move), history_(history) {
+    killers_[0] = killers ? killers[0] : NO_MOVE;
+    killers_[1] = killers ? killers[1] : NO_MOVE;
+  }
+
+  Move next() {
+    switch (stage_) {
+      case HASH:
+        stage_ = SPLIT;
+        for (int i = 0; i < list_.size; i++)
+          if (list_.moves[i] == hash_) return hash_;
+        hash_ = NO_MOVE;  // not a move here (or none stored)
+        [[fallthrough]];
+      case SPLIT:
+        split();
+        stage_ = CAPTURES;
+        [[fallthrough]];
+      case CAPTURES:
+        while (cap_cur_ < n_caps_) {
+          Move m = pick(caps_, cap_scores_, cap_cur_, n_caps_);
+          if (see(pos_, m) >= 0) return m;
+          bad_[n_bad_++] = m;  // still in MVV-LVA order
+        }
+        stage_ = PROMOTIONS;
+        [[fallthrough]];
+      case PROMOTIONS:
+        if (promo_cur_ < n_promos_) return promos_[promo_cur_++];
+        stage_ = KILLERS;
+        [[fallthrough]];
+      case KILLERS:
+        while (killer_cur_ < 2) {
+          Move k = killers_[killer_cur_++];
+          if (k != NO_MOVE && k != hash_ && in_quiets(k)) return k;
+          if (killer_cur_ == 1 && k != NO_MOVE) killers_[0] = NO_MOVE;  // not playable here; don't skip it later
+          if (killer_cur_ == 2 && k != NO_MOVE && !in_quiets(k)) killers_[1] = NO_MOVE;
+        }
+        stage_ = BAD_CAPTURES;
+        [[fallthrough]];
+      case BAD_CAPTURES:
+        if (bad_cur_ < n_bad_) return bad_[bad_cur_++];
+        stage_ = QUIETS;
+        for (int i = 0; i < n_quiets_; i++) quiet_scores_[i] = history_[move_from(quiets_[i])][move_to(quiets_[i])];
+        [[fallthrough]];
+      case QUIETS:
+        while (quiet_cur_ < n_quiets_) {
+          Move m = pick(quiets_, quiet_scores_, quiet_cur_, n_quiets_);
+          if (m != killers_[0] && m != killers_[1]) return m;  // killers were already returned
+        }
+        stage_ = DONE;
+        [[fallthrough]];
+      case DONE:
+        return NO_MOVE;
+    }
+    return NO_MOVE;
+  }
+
+ private:
+  enum Stage { HASH, SPLIT, CAPTURES, PROMOTIONS, KILLERS, BAD_CAPTURES, QUIETS, DONE };
+
+  void split() {
+    for (int i = 0; i < list_.size; i++) {
+      Move m = list_.moves[i];
+      if (m == hash_) continue;
+      if (is_capture(m)) {
+        caps_[n_caps_] = m;
+        cap_scores_[n_caps_++] = mvv_lva(pos_, m);
+      } else if (is_promotion(m) && promotion_type(m) == QUEEN) {
+        promos_[n_promos_++] = m;
+      } else {
+        quiets_[n_quiets_++] = m;
+      }
+    }
+  }
+
+  bool in_quiets(Move m) const {
+    for (int i = 0; i < n_quiets_; i++)
+      if (quiets_[i] == m) return true;
+    return false;
+  }
+
+  // Selection step: move the highest-scored remaining entry to position `cur` and return it.
+  static Move pick(Move* moves, int* scores, int& cur, int n) {
+    int best = cur;
+    for (int i = cur + 1; i < n; i++)
+      if (scores[i] > scores[best]) best = i;
+    std::swap(moves[cur], moves[best]);
+    std::swap(scores[cur], scores[best]);
+    return moves[cur++];
+  }
+
+  const Position& pos_;
+  const MoveList& list_;
+  Move hash_;
+  Move killers_[2];
+  const int (*history_)[64];
+  Stage stage_ = HASH;
+  Move caps_[MAX_MOVES], bad_[MAX_MOVES], promos_[MAX_MOVES], quiets_[MAX_MOVES];
+  int cap_scores_[MAX_MOVES], quiet_scores_[MAX_MOVES];
+  int n_caps_ = 0, n_bad_ = 0, n_promos_ = 0, n_quiets_ = 0;
+  int cap_cur_ = 0, bad_cur_ = 0, promo_cur_ = 0, quiet_cur_ = 0, killer_cur_ = 0;
+};
+
 }  // namespace
 
 std::string format_score(int score) {
@@ -182,10 +293,10 @@ int Searcher::quiesce(const Position& pos, int alpha, int beta, int ply) {
     if (stand_pat > alpha) alpha = stand_pat;
     generate(pos, list, true);
   }
-  order_moves(pos, list.moves, list.size, hash_move, MAX_PLY);
+  MovePicker picker(pos, list, hash_move, nullptr, history_[pos.side]);
   bool any_legal = false;
   Move best = NO_MOVE;
-  for (Move m : list) {
+  for (Move m; (m = picker.next()) != NO_MOVE;) {
     if (!in_check && !is_capture(m)) continue;  // quiet queen promotions are not searched here (as in stage D)
     if (!in_check && see(pos, m) < 0) continue;  // captures that lose material are never the best way out
     if (!is_legal(pos, m)) continue;
@@ -272,13 +383,13 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
 
   MoveList list;
   generate(pos, list);
-  order_moves(pos, list.moves, list.size, hash_move, ply);
+  MovePicker picker(pos, list, hash_move, ply < MAX_PLY ? killers_[ply] : nullptr, history_[pos.side]);
   int alpha_orig = alpha;
   Move best = NO_MOVE;
   int searched = 0, legal = 0;
   Move quiets_tried[MAX_MOVES];
   int n_quiets = 0;
-  for (Move m : list) {
+  for (Move m; (m = picker.next()) != NO_MOVE;) {
     if (!is_legal(pos, m)) continue;
     legal++;
     Position next = pos.make(m);
