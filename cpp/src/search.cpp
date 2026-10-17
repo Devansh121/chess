@@ -238,6 +238,9 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
   // certainly would too. Skipped in check, in PV nodes, right after another null move, and with only
   // pawns left (zugzwang is common there).
   bool pv_node = beta - alpha > 1;
+  // Internal iterative reduction: with no stored best move, ordering here will be poor, so search one
+  // ply shallower; the result fills in a hash move for when this position comes back deeper.
+  if (hash_move == NO_MOVE && depth >= 4) depth--;
   int static_eval = in_check ? -INF : evaluate(pos, ply);
 
   // Reverse futility pruning: close to the leaves, if the static eval beats beta by a margin that
