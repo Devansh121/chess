@@ -34,7 +34,16 @@ bench_base=$("$work/engine-base" bench 6)
 name=ci-elo-$(date +%s)
 set +e
 tools/run_match.sh "$name" "uci:$work/engine-head" "uci:$work/engine-base" "$games" "$shards" \
-  --nodes "$nodes" --random-plies 4 --seed 1 > /dev/null
+  --nodes "$nodes" --random-plies 4 --seed 1 > /dev/null &
+match_pid=$!
+# Live progress in the job log: games played and the running score (head's wins/draws/losses).
+while kill -0 "$match_pid" 2> /dev/null; do
+  sleep 30
+  tail -qn1 runs/"$name"/shard*.log 2> /dev/null | grep -o '+[0-9]* =[0-9]* -[0-9]*' |
+    awk '{w += substr($1, 2); d += substr($2, 2); l += substr($3, 2)}
+         END {if (w + d + l) printf "progress: %d/'"$games"' games  head +%d =%d -%d\n", w + d + l, w, d, l}'
+done
+wait "$match_pid"
 PYTHON=${PYTHON:-.venv/bin/python}
 summary=$("$PYTHON" tools/summarize.py runs/"$name"/shard*.log --fail-below -10)
 status=$?

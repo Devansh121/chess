@@ -46,7 +46,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-      - run: PYTHON=python ELO_REPORT=elo-report.md tools/ci_elo.sh "origin/${{ github.base_ref }}" 1000 4 20000
+      - run: PYTHON=python ELO_REPORT=elo-report.md tools/ci_elo.sh "origin/${{ github.base_ref }}" 1000 4 100000
       - name: Post the result on the PR
         if: always() && hashFiles('elo-report.md') != ''
         env:
