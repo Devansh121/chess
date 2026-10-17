@@ -20,3 +20,12 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: pytest -q
+
+  cpp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release -DNATIVE=OFF
+      - run: cmake --build cpp/build -j 4
+      - run: ctest --test-dir cpp/build --output-on-failure
