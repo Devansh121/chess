@@ -16,7 +16,7 @@ longer time controls, so treat absolute numbers as approximate and comparisons a
 | C++ port of stage D | vs Python stage D, 80 games | +80 =0 -0 | |
 | C++ port of stage D | vs Stockfish 1900 / 2200 / 2500, 80 each | +65 =6 -9 / +47 =13 -20 / +29 =16 -35 | ~2200 / ~2320 / ~2475 |
 | C++ with search improvements (#15-#37) + v2 network | vs hand-written eval, same engine, 400 games | +228 =17 -155 (+64 ± 34) | |
-| C++ with search improvements + v2 network | vs Stockfish 2500, 160 games | +94 =21 -45 (+110 ± 53) | **~2610** |
+| C++ with search improvements + v2 network | vs Stockfish 2500 / 2800 / 3000, 160 each | +94 =21 -45 (+110 ± 53) / +17 =54 -89 (-168 ± 46) / +4 =38 -118 (-310 ± 56) | ~2610 / ~2630 / ~2690, **~2640** |
 
 ## Search changes (C++)
 
