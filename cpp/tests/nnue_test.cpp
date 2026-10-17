@@ -119,7 +119,8 @@ int main() {
       int worst = walk(net, pos, acc, 3, nodes, worst_quant);
       check(worst == 0, "arch " + std::to_string(arch) + " incremental == refresh exactly over " +
                             std::to_string(nodes) + " nodes: " + fen);
-      check(worst_quant < 0.02f, "arch " + std::to_string(arch) + " quantized within 0.02 of float logit (max " +
+      // int8 hidden weights and 7-bit activations: about twice the int16 version's rounding error.
+      check(worst_quant < 0.04f, "arch " + std::to_string(arch) + " quantized within 0.04 of float logit (max " +
                                      std::to_string(worst_quant) + ")");
       Position flipped = colour_flipped(pos);
       nnue::Accumulator a2;

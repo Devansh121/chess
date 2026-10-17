@@ -45,37 +45,56 @@ inline void sub_row(int16_t* acc, const int16_t* row, int n) {
   for (; i < n; i++) acc[i] = int16_t(acc[i] - row[i]);
 }
 
-// Sum of a[i] * b[i] over n int16 values (n a multiple of 16 for the AVX2 path).
-inline int32_t dot_i16(const int16_t* a, const int16_t* b, int n) {
-  int i = 0;
-  int32_t total = 0;
-#if defined(__AVX2__)
-  __m256i sum = _mm256_setzero_si256();
-  for (; i + 16 <= n; i += 16) {
-    __m256i x = _mm256_load_si256(reinterpret_cast<const __m256i*>(a + i));
-    __m256i y = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + i));
-    sum = _mm256_add_epi32(sum, _mm256_madd_epi16(x, y));  // pairwise products summed into int32
-  }
-  __m128i s = _mm_add_epi32(_mm256_castsi256_si128(sum), _mm256_extracti128_si256(sum, 1));
-  s = _mm_add_epi32(s, _mm_shuffle_epi32(s, 0x4E));
-  s = _mm_add_epi32(s, _mm_shuffle_epi32(s, 0xB1));
-  total = _mm_cvtsi128_si32(s);
-#endif
-  for (; i < n; i++) total += int32_t(a[i]) * b[i];
-  return total;
-}
-
-// Clip accumulator values to [0, QA] (the integer form of clamp(x, 0, 1)).
-inline void clipped(const int16_t* acc, int16_t* out, int n) {
+// Clip accumulator values to [0, QA] (the integer form of clamp(x, 0, 1)) and narrow to uint8.
+inline void clip_to_u8(const int16_t* acc, uint8_t* out, int n) {
   int i = 0;
 #if defined(__AVX2__)
   const __m256i zero = _mm256_setzero_si256(), top = _mm256_set1_epi16(QA);
-  for (; i + 16 <= n; i += 16) {
-    __m256i x = _mm256_load_si256(reinterpret_cast<const __m256i*>(acc + i));
-    _mm256_store_si256(reinterpret_cast<__m256i*>(out + i), _mm256_min_epi16(_mm256_max_epi16(x, zero), top));
+  for (; i + 32 <= n; i += 32) {
+    __m256i a = _mm256_load_si256(reinterpret_cast<const __m256i*>(acc + i));
+    __m256i b = _mm256_load_si256(reinterpret_cast<const __m256i*>(acc + i + 16));
+    a = _mm256_min_epi16(_mm256_max_epi16(a, zero), top);
+    b = _mm256_min_epi16(_mm256_max_epi16(b, zero), top);
+    // packus works per 128-bit lane; the permute restores element order.
+    __m256i packed = _mm256_permute4x64_epi64(_mm256_packus_epi16(a, b), 0xD8);
+    _mm256_storeu_si256(reinterpret_cast<__m256i*>(out + i), packed);
   }
 #endif
-  for (; i < n; i++) out[i] = int16_t(std::clamp<int>(acc[i], 0, QA));
+  for (; i < n; i++) out[i] = uint8_t(std::clamp<int>(acc[i], 0, QA));
+}
+
+// out[j] = sum_i h[i] * w[j * width + i] for j < h2.
+inline void hidden_layer(const uint8_t* h, const int8_t* w, int width, int h2, int32_t* out) {
+  int j = 0;
+#if defined(__AVX2__)
+  if (width % 32 == 0) {
+    const __m256i ones = _mm256_set1_epi16(1);
+    for (; j + 8 <= h2; j += 8) {
+      __m256i acc[8];
+      for (auto& a : acc) a = _mm256_setzero_si256();
+      for (int c = 0; c < width; c += 32) {
+        __m256i x = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(h + c));
+        for (int k = 0; k < 8; k++) {
+          __m256i y = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(w + size_t(j + k) * width + c));
+          // uint8 x int8 products summed in pairs to int16, then pairs of those to int32.
+          acc[k] = _mm256_add_epi32(acc[k], _mm256_madd_epi16(_mm256_maddubs_epi16(x, y), ones));
+        }
+      }
+      // Reduce the 8 accumulators to one vector holding the 8 totals, in order.
+      __m256i s01 = _mm256_hadd_epi32(acc[0], acc[1]), s23 = _mm256_hadd_epi32(acc[2], acc[3]);
+      __m256i s45 = _mm256_hadd_epi32(acc[4], acc[5]), s67 = _mm256_hadd_epi32(acc[6], acc[7]);
+      __m256i s0123 = _mm256_hadd_epi32(s01, s23), s4567 = _mm256_hadd_epi32(s45, s67);
+      __m256i sums = _mm256_add_epi32(_mm256_permute2x128_si256(s0123, s4567, 0x20),
+                                      _mm256_permute2x128_si256(s0123, s4567, 0x31));
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(out + j), sums);
+    }
+  }
+#endif
+  for (; j < h2; j++) {
+    int32_t s = 0;
+    for (int i = 0; i < width; i++) s += int32_t(h[i]) * w[size_t(j) * width + i];
+    out[j] = s;
+  }
 }
 
 }  // namespace
@@ -113,15 +132,16 @@ std::string Network::load(const std::string& path) {
   for (float x : b1) max_b1 = std::max(max_b1, std::fabs(x));
   for (float x : w2) max_w2 = std::max(max_w2, std::fabs(x));
   if ((max_b1 + 32 * max_w1) * QA > 32000) return "first-layer weights too large for int16 accumulators";
-  if (max_w2 * QB > 32000) return "second-layer weights too large for int16";
-  if (double(arch) * h1 * QA * (max_w2 * QB) > 2.0e9) return "second-layer sums could overflow int32";
+  qb = max_w2 > 0 ? int(127.0f / max_w2) : 127;
+  qb = std::min(qb, 127);
+  if (qb < QB_MIN) return "second-layer weights too large for int8";
 
   w1q.resize(w1.size());
   b1q.resize(b1.size());
   w2q.resize(w2.size());
   for (size_t i = 0; i < w1.size(); i++) w1q[i] = quantize(w1[i], QA);
   for (size_t i = 0; i < b1.size(); i++) b1q[i] = quantize(b1[i], QA);
-  for (size_t i = 0; i < w2.size(); i++) w2q[i] = quantize(w2[i], QB);
+  for (size_t i = 0; i < w2.size(); i++) w2q[i] = int8_t(std::clamp<long>(std::lround(w2[i] * qb), -127, 127));
   return "";
 }
 
@@ -160,16 +180,16 @@ void update(const Network& net, const Position& parent, const Position& child, c
 
 float logit(const Network& net, const Accumulator& acc, int side_to_move) {
   int n = net.hidden1;
-  alignas(64) int16_t h1[2 * MAX_HIDDEN1];
-  clipped(acc.v[side_to_move], h1, n);
-  if (net.arch == 2) clipped(acc.v[side_to_move ^ 1], h1 + n, n);
+  alignas(64) uint8_t h1[2 * MAX_HIDDEN1];
+  clip_to_u8(acc.v[side_to_move], h1, n);
+  if (net.arch == 2) clip_to_u8(acc.v[side_to_move ^ 1], h1 + n, n);
   int width = net.arch * n;
-  const float scale = 1.0f / (float(QA) * QB);
+  alignas(64) int32_t sums[256];
+  int h2 = std::min(net.hidden2, 256);
+  hidden_layer(h1, net.w2q.data(), width, h2, sums);
+  const float scale = 1.0f / (float(QA) * net.qb);
   float out = net.b3;
-  for (int j = 0; j < net.hidden2; j++) {
-    float s = float(dot_i16(h1, &net.w2q[size_t(j) * width], width)) * scale + net.b2[j];
-    out += net.w3[j] * std::clamp(s, 0.0f, 1.0f);
-  }
+  for (int j = 0; j < h2; j++) out += net.w3[j] * std::clamp(float(sums[j]) * scale + net.b2[j], 0.0f, 1.0f);
   return out;
 }
 

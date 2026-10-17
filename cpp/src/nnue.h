@@ -9,9 +9,11 @@
 // arch 1: clip(acc[side to move]) -> hidden2 -> 1
 // arch 2: [clip(acc[side to move]), clip(acc[other side])] -> hidden2 -> 1
 //
-// The search uses a quantized integer version: w1/b1 scaled by QA = 255 into int16, so the clipped
-// activation range [0, 1] becomes [0, 255]; w2 scaled by QB = 256 into int16; the 32 -> 1 output layer
-// stays in float. With AVX2 the accumulator updates and the hidden layer use 256-bit integer SIMD.
+// The search uses a quantized integer version: w1/b1 scaled by QA = 127 into int16, so the clipped
+// activation range [0, 1] becomes [0, 127] and fits a uint8; w2 scaled into int8 by the largest factor
+// that fits this network's weights (qb, at least QB_MIN); the 32 -> 1
+// output layer stays in float. With AVX2 the accumulator updates use 16-bit lanes and the hidden layer
+// uses maddubs (uint8 x int8 pairs; 2 * 127 * 127 < 32767, so it can't saturate) on 8 outputs at a time.
 // The float functions (refresh_float, logit_float) are the reference the tests compare against.
 #pragma once
 
@@ -25,8 +27,8 @@ namespace nnue {
 
 constexpr int NUM_FEATURES = 768;
 constexpr int MAX_HIDDEN1 = 512;
-constexpr int QA = 255;
-constexpr int QB = 256;
+constexpr int QA = 127;
+constexpr int QB_MIN = 32;  // refuse networks whose hidden weights would need a coarser scale
 
 struct Network {
   int arch = 0;
@@ -40,7 +42,9 @@ struct Network {
   std::vector<float> w3;  // [hidden2]
   float b3 = 0;
   // Quantized copies used by the search.
-  std::vector<int16_t> w1q, b1q, w2q;
+  std::vector<int16_t> w1q, b1q;
+  std::vector<int8_t> w2q;  // [hidden2][arch * hidden1]
+  int qb = 0;               // scale of w2q, chosen per network
 
   // Loads a .nnue file written by scripts/export_net.py and quantizes it. Returns an error message,
   // empty on success (including a refusal if the weights could overflow int16).
