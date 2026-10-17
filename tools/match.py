@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Play two engines against each other and estimate the Elo difference.
 
-usage: tools/match.py ENGINE_A ENGINE_B GAMES [--pgn OUT.pgn] [--movetime SECONDS]
+usage: tools/match.py ENGINE_A ENGINE_B GAMES [--pgn OUT.pgn] [--movetime SECONDS] [--start-game N]
+
+Games start from the positions in tools/openings.txt: game i plays opening i // 2, and
+consecutive games swap colours, so each opening is played once from each side. To split a
+match across parallel processes, give each shard a different even --start-game.
 
 engines:
   random       uniformly random legal move
@@ -150,8 +154,22 @@ def make(name, movetime, our_time):
   sys.exit(f"unknown engine {name}")
 
 
-def play_game(white, black, max_plies=400):
+OPENINGS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "openings.txt")
+
+
+def load_openings(path):
+  """Openings as lists of moves; [[]] (the start position) if the file is missing."""
+  if not path or not os.path.exists(path):
+    return [[]]
+  with open(path) as f:
+    lines = [line.split() for line in f if line.strip() and not line.startswith("#")]
+  return [[chess.Move.from_uci(m) for m in line] for line in lines] or [[]]
+
+
+def play_game(white, black, opening=(), max_plies=400):
   board = chess.Board()
+  for move in opening:
+    board.push(move)
   while not board.is_game_over(claim_draw=True) and len(board.move_stack) < max_plies:
     player = white if board.turn == chess.WHITE else black
     board.push(player.move(board))
@@ -166,6 +184,22 @@ def elo_diff(score, games):
   return bound, -400 * math.log10(1 / s - 1)
 
 
+def elo_margin(wins, draws, losses):
+  """Half-width of the ~95% interval on the Elo difference (normal approximation on the mean score)."""
+  n = wins + draws + losses
+  if n < 2:
+    return float("inf")
+  s = (wins + 0.5 * draws) / n
+  var = (wins * (1 - s) ** 2 + draws * (0.5 - s) ** 2 + losses * s**2) / n
+  se = math.sqrt(var / n)
+
+  def elo(p):
+    p = min(max(p, 1e-3), 1 - 1e-3)
+    return -400 * math.log10(1 / p - 1)
+
+  return (elo(s + 1.96 * se) - elo(s - 1.96 * se)) / 2
+
+
 def main():
   ap = argparse.ArgumentParser()
   ap.add_argument("a")
@@ -174,15 +208,20 @@ def main():
   ap.add_argument("--pgn")
   ap.add_argument("--movetime", type=float, default=0.1, help="Stockfish seconds per move")
   ap.add_argument("--our-time", type=float, default=0.5, help="our engine's seconds per move")
+  ap.add_argument("--openings", default=OPENINGS, help="opening file; '' plays every game from the start position")
+  ap.add_argument("--start-game", type=int, default=0, help="index of the first game, for sharding")
   args = ap.parse_args()
+  openings = load_openings(args.openings)
   pgn = os.path.abspath(args.pgn) if args.pgn else None
 
   a, b = make(args.a, args.movetime, args.our_time), make(args.b, args.movetime, args.our_time)
   wins = draws = losses = 0
   start = time.time()
-  for i in range(args.games):
+  for n in range(args.games):
+    i = args.start_game + n
     a_white = i % 2 == 0
-    result, board = play_game(a, b) if a_white else play_game(b, a)
+    opening = openings[(i // 2) % len(openings)]
+    result, board = play_game(a, b, opening) if a_white else play_game(b, a, opening)
     a_score = {"1-0": 1.0, "0-1": 0.0}.get(result, 0.5)
     if not a_white:
       a_score = 1.0 - a_score
@@ -197,15 +236,17 @@ def main():
       with open(pgn, "a") as f:
         print(game, file=f, end="\n\n")
     print(
-      f"game {i + 1}/{args.games}: {args.a} {'WDL'[[1.0, 0.5, 0.0].index(a_score)]} "
+      f"game {n + 1}/{args.games}: {args.a} {'WDL'[[1.0, 0.5, 0.0].index(a_score)]} "
       f"({len(board.move_stack)} plies)  +{wins} ={draws} -{losses}  {time.time() - start:.0f}s",
       flush=True,
     )
 
   score = wins + 0.5 * draws
   bound, diff = elo_diff(score, args.games)
+  margin = elo_margin(wins, draws, losses)
   print(
-    f"FINAL {args.a} vs {args.b}: +{wins} ={draws} -{losses}  score {score}/{args.games}  Elo diff {bound}{diff:+.0f}"
+    f"FINAL {args.a} vs {args.b}: +{wins} ={draws} -{losses}  score {score}/{args.games}  "
+    f"Elo diff {bound}{diff:+.0f} +/- {margin:.0f}"
   )
   a.close()
   b.close()
