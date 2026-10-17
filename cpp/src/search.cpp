@@ -194,8 +194,15 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
   // certainly would too. Skipped in check, in PV nodes, right after another null move, and with only
   // pawns left (zugzwang is common there).
   bool pv_node = beta - alpha > 1;
+  int static_eval = in_check ? -INF : eval::evaluate(pos);
+
+  // Reverse futility pruning: close to the leaves, if the static eval beats beta by a margin that
+  // grows with the remaining depth, the opponent is unlikely to recover in so few moves.
+  if (!pv_node && !in_check && depth <= 6 && std::abs(beta) < MATE_BOUND && static_eval - 80 * depth >= beta)
+    return static_eval;
+
   if (allow_null && !pv_node && depth >= 3 && !in_check && pos.has_non_pawn_material(pos.side) &&
-      eval::evaluate(pos) >= beta) {
+      static_eval >= beta) {
     int r = 2 + depth / 6;
     Position next = pos.make_null();
     stack_.push_back(next.hash);
