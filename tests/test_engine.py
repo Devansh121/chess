@@ -124,3 +124,41 @@ def test_uci_session():
   board = chess.Board()
   board.push_uci("e2e4")
   assert chess.Move.from_uci(lines[-1].split()[1]) in board.legal_moves
+
+
+# --- transposition table ---
+
+# King-and-pawn endgame: few moves per position and many transpositions (king routes), so depth 5 is fast.
+ENDGAME = "4k3/8/8/8/8/8/4P3/4K3 w - - 0 1"
+
+
+def test_tt_searches_fewer_nodes():
+  without, with_tt = Searcher(use_tt=False), Searcher()
+  without.search(chess.Board(ENDGAME), max_depth=5)
+  with_tt.search(chess.Board(ENDGAME), max_depth=5)
+  assert with_tt.nodes < without.nodes
+
+
+def test_tt_is_reused_by_the_next_search():
+  s = Searcher()
+  s.search(chess.Board(ENDGAME), max_depth=5)
+  first = s.nodes
+  s.search(chess.Board(ENDGAME), max_depth=5)
+  assert s.nodes < first / 2
+
+
+def test_tt_mate_scores_round_trip():
+  from engine.search import MATE, _from_tt, _to_tt
+
+  for score in (MATE - 5, -(MATE - 7), 123, -45):
+    assert _from_tt(_to_tt(score, 3), 3) == score
+  # a mate found 3 plies from the root is stored as 'mate from this node' and re-read correctly 5 plies deep
+  assert _from_tt(_to_tt(MATE - 10, 3), 5) == MATE - 12
+
+
+def test_tt_finds_the_same_mate_in_two():
+  board = chess.Board("7k/8/8/8/8/8/R7/1R4K1 w - - 0 1")
+  s = Searcher()
+  s.search(board, max_depth=4)
+  _, score, _ = s.search(board, max_depth=4)  # second search answers mostly from the table
+  assert mate_in(score) == 2
