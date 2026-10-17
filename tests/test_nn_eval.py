@@ -106,3 +106,35 @@ def test_cp_scale_from_the_weights_file(tmp_path):
   assert wide.cp_per_logit == pytest.approx(1000 / math.log(10))
   board = chess.Board("r1bq1rk1/pp2bppp/2n1pn2/3p4/2PP4/2N1PN2/PP1B1PPP/R2QKB1R w KQ - 0 8")
   assert wide.logit(board) == default.logit(board)
+
+
+@pytest.mark.parametrize("arch", ["v1", "v2"])
+def test_cpp_engine_matches_torch(tmp_path, arch):
+  """The C++ engine's network evaluation (via its 'eval' command) equals the PyTorch model's output."""
+  import json
+  import os
+
+  torch = pytest.importorskip("torch")
+  binary = os.path.join(REPO, "cpp", "build", "chess-engine")
+  if not os.path.exists(binary):
+    pytest.skip("C++ engine not built (cmake -S cpp -B cpp/build && cmake --build cpp/build)")
+  from nn.features import pack
+  from nn.model import ARCHS, to_model_input
+
+  torch.manual_seed(1)
+  model = ARCHS[arch]()
+  torch.save(model.state_dict(), tmp_path / "n.pt")
+  (tmp_path / "n.json").write_text(json.dumps({"args": {"arch": arch, "cp_scale": 400.0}}))
+  subprocess.run(
+    [sys.executable, "scripts/export_net.py", str(tmp_path / "n.pt"), str(tmp_path / "n.nnue")], check=True, cwd=REPO
+  )
+  script = f"setoption name EvalFile value {tmp_path / 'n.nnue'}\n"
+  for fen in FENS:
+    script += f"position fen {fen}\neval\n"
+  out = subprocess.run([binary], input=script + "quit\n", capture_output=True, text=True, timeout=30).stdout
+  logits = [float(line.split("logit ")[1]) for line in out.splitlines() if line.startswith("eval ")]
+  assert len(logits) == len(FENS), out
+  with torch.no_grad():
+    for fen, got in zip(FENS, logits, strict=True):
+      expected = model(to_model_input(np.array([pack(fen_features(fen))]))).item()
+      assert got == pytest.approx(expected, abs=1e-4), fen

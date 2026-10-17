@@ -12,6 +12,7 @@
 
 #include "eval.h"
 #include "movegen.h"
+#include "nnue.h"
 #include "search.h"
 
 namespace {
@@ -92,6 +93,8 @@ int main(int argc, char** argv) {
   }
 
   Searcher searcher(64);
+  nnue::Network network;
+  std::string eval_file;
   Position pos;
   pos.set_fen(START_FEN);
   std::vector<U64> history;  // hashes of positions before the current one
@@ -111,6 +114,7 @@ int main(int argc, char** argv) {
       send(std::string("id name ") + NAME);
       send(std::string("id author ") + AUTHOR);
       send("option name Hash type spin default 64 min 1 max 4096");
+      send("option name EvalFile type string default <empty>");
       send("uciok");
     } else if (cmd == "isready") {
       send("readyok");
@@ -122,6 +126,27 @@ int main(int argc, char** argv) {
       if (name == "Hash" && !value.empty()) {
         stop_search();
         searcher.resize_hash(std::max(1, std::stoi(value)));
+      } else if (name == "EvalFile") {
+        stop_search();
+        std::string rest;
+        std::getline(in, rest);  // paths may contain spaces
+        value += rest;
+        if (value.empty() || value == "<empty>") {
+          searcher.set_network(nullptr);
+          eval_file.clear();
+          send("info string using the hand-written evaluation");
+        } else {
+          std::string err = network.load(value);
+          if (err.empty()) {
+            searcher.set_network(&network);
+            eval_file = value;
+            send("info string loaded network " + value);
+          } else {
+            searcher.set_network(nullptr);
+            eval_file.clear();
+            send("info string failed to load network: " + err);
+          }
+        }
       }
     } else if (cmd == "ucinewgame") {
       stop_search();
@@ -181,6 +206,17 @@ int main(int argc, char** argv) {
       std::fflush(stdout);
     } else if (cmd == "d") {
       send(pos.fen());
+    } else if (cmd == "eval") {
+      std::string line_out = "eval hand-written " + std::to_string(eval::evaluate(pos));
+      if (!eval_file.empty()) {
+        nnue::Accumulator acc;
+        nnue::refresh(network, pos, acc);
+        char buf[96];
+        std::snprintf(buf, sizeof(buf), " network %d logit %.6f", nnue::evaluate(network, acc, pos.side),
+                      nnue::logit(network, acc, pos.side));
+        line_out += buf;
+      }
+      send(line_out);
     } else if (cmd == "quit") {
       break;
     }
