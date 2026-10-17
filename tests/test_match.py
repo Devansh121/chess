@@ -60,3 +60,17 @@ def test_game_starts_from_opening():
 def test_elo_margin_shrinks_with_more_games():
   assert match.elo_margin(30, 20, 30) > match.elo_margin(300, 200, 300)
   assert 50 < match.elo_margin(30, 20, 30) < 100
+
+
+def test_randomized_opening_is_reproducible_and_legal():
+  opening = match.load_openings(match.OPENINGS)[3]
+  a = match.randomized_opening(opening, 4, "seed-7")
+  b = match.randomized_opening(opening, 4, "seed-7")
+  c = match.randomized_opening(opening, 4, "seed-8")
+  assert a == b
+  assert a[: len(opening)] == opening and len(a) == len(opening) + 4
+  assert a != c
+  board = chess.Board()
+  for move in a:
+    assert move in board.legal_moves
+    board.push(move)

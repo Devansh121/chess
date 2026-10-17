@@ -29,3 +29,18 @@ jobs:
       - run: cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release -DNATIVE=OFF
       - run: cmake --build cpp/build -j 4
       - run: ctest --test-dir cpp/build --output-on-failure
+
+  elo:
+    # Strength test of the C++ engine against the PR's base branch; fails only on a confident regression.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: PYTHON=python tools/ci_elo.sh "origin/${{ github.base_ref }}" 1000 4 20000

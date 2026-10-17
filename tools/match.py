@@ -15,7 +15,8 @@ engines:
   ours         this repo's engine over UCI (python -m engine.uci)
   ours:PATH    the engine in another checkout, e.g. a git worktree of an older commit
   oursnn:FILE  this repo's engine with the value network in FILE (.npz from scripts/export_net.py)
-  uci:PATH     any UCI engine binary (e.g. cpp/build/chess-engine), given --our-time per move
+  uci:PATH     any UCI engine binary (e.g. cpp/build/chess-engine), given --our-time per move,
+               or --nodes per move (reproducible, independent of machine speed)
 
 env:
   STOCKFISH    path to the Stockfish binary (default ~/.local/share/stockfish/stockfish-17.1)
@@ -63,10 +64,10 @@ class Stockfish:
 
 
 class UciEngine:
-  """Any UCI engine binary, thinking a fixed time per move."""
+  """Any UCI engine binary, thinking a fixed time (or a fixed number of nodes) per move."""
 
-  def __init__(self, path, movetime):
-    self.limit = chess.engine.Limit(time=movetime)
+  def __init__(self, path, movetime, nodes=0):
+    self.limit = chess.engine.Limit(nodes=nodes) if nodes else chess.engine.Limit(time=movetime)
     self.engine = chess.engine.SimpleEngine.popen_uci(os.path.abspath(path))
 
   def move(self, board):
@@ -158,11 +159,11 @@ class TwitchchessClassic:
     pass
 
 
-def make(name, movetime, our_time):
+def make(name, movetime, our_time, nodes=0):
   if name == "ours" or name.startswith("ours:"):
     return Ours(os.path.abspath(name[5:] or REPO), our_time)
   if name.startswith("uci:"):
-    return UciEngine(name[4:], our_time)
+    return UciEngine(name[4:], our_time, nodes)
   if name.startswith("oursnn:"):
     return Ours(REPO, our_time, {"EvalFile": os.path.abspath(name[7:])})
   if name == "random":
@@ -186,6 +187,23 @@ def load_openings(path):
   with open(path) as f:
     lines = [line.split() for line in f if line.strip() and not line.startswith("#")]
   return [[chess.Move.from_uci(m) for m in line] for line in lines] or [[]]
+
+
+def randomized_opening(opening, plies, seed):
+  """The opening plus `plies` random legal moves chosen by `seed` (same seed -> same moves)."""
+  rng = random.Random(seed)
+  board = chess.Board()
+  for move in opening:
+    board.push(move)
+  moves = list(opening)
+  for _ in range(plies):
+    legal = list(board.legal_moves)
+    if not legal or board.is_game_over():
+      break
+    move = rng.choice(legal)
+    board.push(move)
+    moves.append(move)
+  return moves
 
 
 def play_game(white, black, opening=(), max_plies=400):
@@ -232,17 +250,25 @@ def main():
   ap.add_argument("--our-time", type=float, default=0.5, help="our engine's seconds per move")
   ap.add_argument("--openings", default=OPENINGS, help="opening file; '' plays every game from the start position")
   ap.add_argument("--start-game", type=int, default=0, help="index of the first game, for sharding")
+  ap.add_argument("--nodes", type=int, default=0, help="nodes per move for uci:PATH engines (instead of time)")
+  ap.add_argument(
+    "--random-plies", type=int, default=0, help="random moves after each opening; both games of a pair share them"
+  )
+  ap.add_argument("--seed", type=int, default=0)
   args = ap.parse_args()
   openings = load_openings(args.openings)
   pgn = os.path.abspath(args.pgn) if args.pgn else None
 
-  a, b = make(args.a, args.movetime, args.our_time), make(args.b, args.movetime, args.our_time)
+  a = make(args.a, args.movetime, args.our_time, args.nodes)
+  b = make(args.b, args.movetime, args.our_time, args.nodes)
   wins = draws = losses = 0
   start = time.time()
   for n in range(args.games):
     i = args.start_game + n
     a_white = i % 2 == 0
     opening = openings[(i // 2) % len(openings)]
+    if args.random_plies:
+      opening = randomized_opening(opening, args.random_plies, f"{args.seed}-{i // 2}")
     result, board = play_game(a, b, opening) if a_white else play_game(b, a, opening)
     a_score = {"1-0": 1.0, "0-1": 0.0}.get(result, 0.5)
     if not a_white:
