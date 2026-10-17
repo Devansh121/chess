@@ -58,7 +58,8 @@ void init_magics(bool rook, Magic* magics, std::vector<U64>& table, Rng& rng) {
   table.assign(total, 0);
 
   size_t offset = 0;
-  std::vector<U64> occs, atts, used;
+  std::vector<U64> occs, atts;
+  std::vector<uint32_t> stamp;  // slot -> attempt number that filled it; no clearing between attempts
   for (int sq = 0; sq < 64; sq++) {
     U64 mask = relevant_mask(sq, rook);
     int bits = popcount(mask);
@@ -78,19 +79,17 @@ void init_magics(bool rook, Magic* magics, std::vector<U64>& table, Rng& rng) {
     m.mask = mask;
     m.shift = 64 - bits;
     m.attacks = &table[offset];
-    used.assign(size, 0);
-    for (;;) {
+    stamp.assign(size, 0);
+    for (uint32_t attempt = 1;; attempt++) {
       U64 magic = rng.sparse();
       if (popcount((mask * magic) & 0xFF00000000000000ULL) < 6) continue;  // quick reject of weak candidates
       m.magic = magic;
-      std::fill(used.begin(), used.end(), 0);
-      std::fill(m.attacks, m.attacks + size, 0);
       bool ok = true;
       for (size_t i = 0; i < occs.size() && ok; i++) {
         U64 idx = m.index(occs[i]);
         // Two blocker sets may share a slot only if they give the same attacks.
-        if (!used[idx]) {
-          used[idx] = 1;
+        if (stamp[idx] != attempt) {
+          stamp[idx] = attempt;
           m.attacks[idx] = atts[i];
         } else if (m.attacks[idx] != atts[i]) {
           ok = false;
