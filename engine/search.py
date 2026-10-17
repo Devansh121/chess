@@ -19,6 +19,13 @@ INF = MATE + 1
 # or an upper bound (no move raised alpha).
 EXACT, LOWER, UPPER = 0, 1, 2
 TT_MAX_ENTRIES = 300_000  # ~100 MB of Python tuples; the table is cleared when full
+MAX_PLY = 128
+
+# Move-ordering scores: hash move, then captures (MVV-LVA), queen promotions, killers, quiet moves.
+ORDER_HASH = 10_000_000
+ORDER_CAPTURE = 1_000_000
+ORDER_PROMOTION = 900_000
+ORDER_KILLER = 800_000
 
 
 class Timeout(Exception):
@@ -59,6 +66,8 @@ class Searcher:
     self.use_tt = use_tt
     # position key -> (depth, score, bound, best_move); kept between moves of a game
     self.tt = {}
+    # two quiet moves per ply that recently caused a beta cutoff
+    self.killers = [[None, None] for _ in range(MAX_PLY)]
 
   def search(self, board, time_limit=None, max_depth=64, info=None):
     """Return (best_move, score, depth) for `board`.
@@ -69,6 +78,7 @@ class Searcher:
     """
     self.nodes = 0
     self.stop = False
+    self.killers = [[None, None] for _ in range(MAX_PLY)]
     start = time.monotonic()
     self.deadline = start + time_limit if time_limit else None
     legal = list(board.legal_moves)
@@ -77,7 +87,7 @@ class Searcher:
     best_move, best_score, done_depth = legal[0], 0, 0
     for depth in range(1, max_depth + 1):
       try:
-        score, move = self._root(board, depth)
+        score, move = self._root(board, depth, best_move if done_depth else None)
       except Timeout:
         break
       best_move, best_score, done_depth = move, score, depth
@@ -91,10 +101,11 @@ class Searcher:
     if self.stop or (self.deadline is not None and (self.nodes & 1023) == 0 and time.monotonic() > self.deadline):
       raise Timeout
 
-  def _root(self, board, depth):
+  def _root(self, board, depth, prev_best):
+    """Search every root move; the previous iteration's best move goes first."""
     alpha, beta = -INF, INF
     best_move = None
-    for move in board.legal_moves:
+    for move in self._ordered(board, prev_best, 0):
       board.push(move)
       try:
         score = -self._negamax(board, depth - 1, -beta, -alpha, 1)
@@ -115,19 +126,22 @@ class Searcher:
       return self._leaf(board, alpha, beta, ply)
 
     key = None
+    hash_move = None
     if self.use_tt:
       # python-chess's own position key (pieces, side to move, castling, en passant); pinned in requirements.txt
       key = board._transposition_key()
       entry = self.tt.get(key)
-      if entry is not None and entry[0] >= depth:
-        score, bound = _from_tt(entry[1], ply), entry[2]
-        if bound == EXACT or (bound == LOWER and score >= beta) or (bound == UPPER and score <= alpha):
-          return score
+      if entry is not None:
+        hash_move = entry[3]  # best move from an earlier search of this position, even a shallower one
+        if entry[0] >= depth:
+          score, bound = _from_tt(entry[1], ply), entry[2]
+          if bound == EXACT or (bound == LOWER and score >= beta) or (bound == UPPER and score <= alpha):
+            return score
 
     alpha_orig = alpha
     best_move = None
     any_move = False
-    for move in board.legal_moves:
+    for move in self._ordered(board, hash_move, ply):
       any_move = True
       board.push(move)
       try:
@@ -136,6 +150,10 @@ class Searcher:
         board.pop()
       if score >= beta:
         self._store(key, depth, beta, LOWER, move, ply)
+        if not board.is_capture(move) and ply < MAX_PLY:
+          killers = self.killers[ply]
+          if killers[0] != move:
+            killers[1], killers[0] = killers[0], move
         return beta
       if score > alpha:
         alpha, best_move = score, move
@@ -144,6 +162,25 @@ class Searcher:
       return -(MATE - ply) if board.is_check() else 0
     self._store(key, depth, alpha, EXACT if alpha > alpha_orig else UPPER, best_move, ply)
     return alpha
+
+  def _ordered(self, board, hash_move, ply):
+    """Legal moves, most promising first, so alpha-beta finds cutoffs early."""
+    killers = self.killers[ply] if ply < MAX_PLY else (None, None)
+
+    def score(move):
+      if move == hash_move:
+        return ORDER_HASH
+      if board.is_capture(move):
+        return ORDER_CAPTURE + _mvv_lva(board, move)
+      if move.promotion == chess.QUEEN:
+        return ORDER_PROMOTION
+      if move == killers[0]:
+        return ORDER_KILLER
+      if move == killers[1]:
+        return ORDER_KILLER - 1
+      return 0
+
+    return sorted(board.legal_moves, key=score, reverse=True)
 
   def _store(self, key, depth, score, bound, move, ply):
     if key is None:
