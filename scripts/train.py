@@ -24,15 +24,18 @@ import numpy as np
 import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from nn.features import CP_CLIP  # noqa: E402
+from nn.features import CP_CLIP, CP_SCALE  # noqa: E402
 from nn.model import ValueNet, to_model_input  # noqa: E402
 
 DECIDED_WEIGHT = 0.1  # loss weight for decided positions with --decided weight
 
 
-def load_shard(path, decided):
+def load_shard(path, decided, cp_scale=CP_SCALE):
   d = np.load(path)
   x, y, cp = d["x"], d["y"].astype(np.float32), d["cp"]
+  if cp_scale != CP_SCALE:
+    # Rebuild the target from the stored score; a wider scale keeps large advantages apart in probability space.
+    y = (1.0 / (1.0 + 10.0 ** (-cp.astype(np.float32) / cp_scale))).astype(np.float32)
   w = np.ones(len(y), np.float32)
   is_decided = np.abs(cp) >= CP_CLIP
   if decided == "drop":
@@ -43,14 +46,14 @@ def load_shard(path, decided):
   return x, y, w
 
 
-def batches(shards, decided, batch_size, limit, device, shuffle):
+def batches(shards, decided, batch_size, limit, device, shuffle, cp_scale=CP_SCALE):
   """Yield (x, y, w) batches on `device`, stopping after `limit` positions (0 = all)."""
   seen = 0
   order = list(shards)
   if shuffle:
     random.shuffle(order)
   for path in order:
-    x, y, w = load_shard(path, decided)
+    x, y, w = load_shard(path, decided, cp_scale)
     idx = np.random.permutation(len(y)) if shuffle else np.arange(len(y))
     if limit:
       idx = idx[: max(0, limit - seen)]
@@ -71,11 +74,11 @@ def weighted_mse(logits, y, w):
 
 
 @torch.no_grad()
-def evaluate(model, shards, device, batch_size):
-  """Unweighted MSE on every validation position (decided ones included), so runs stay comparable."""
+def evaluate(model, shards, device, batch_size, cp_scale=CP_SCALE):
+  """Unweighted MSE on every validation position (decided ones included), with the run's own target scale."""
   model.eval()
   total, count = 0.0, 0
-  for x, y, _ in batches(shards, "keep", batch_size, 0, device, shuffle=False):
+  for x, y, _ in batches(shards, "keep", batch_size, 0, device, shuffle=False, cp_scale=cp_scale):
     total += ((torch.sigmoid(model(x)) - y) ** 2).sum().item()
     count += len(y)
   model.train()
@@ -93,6 +96,7 @@ def main():
   ap.add_argument("--batch-size", type=int, default=16384)
   ap.add_argument("--lr", type=float, default=1e-3)
   ap.add_argument("--decided", choices=["keep", "weight", "drop"], default="keep")
+  ap.add_argument("--cp-scale", type=float, default=CP_SCALE, help="target = 1 / (1 + 10^(-cp / scale))")
   ap.add_argument("--seed", type=int, default=0)
   args = ap.parse_args()
 
@@ -117,7 +121,9 @@ def main():
   best = float("inf")
   for epoch in range(args.epochs):
     start, total, count = time.time(), 0.0, 0
-    for x, y, w in batches(train_shards, args.decided, args.batch_size, args.positions, device, shuffle=True):
+    for x, y, w in batches(
+      train_shards, args.decided, args.batch_size, args.positions, device, shuffle=True, cp_scale=args.cp_scale
+    ):
       loss = weighted_mse(model(x), y, w)
       opt.zero_grad(set_to_none=True)
       loss.backward()
@@ -125,7 +131,7 @@ def main():
       total += loss.item() * len(y)
       count += len(y)
     sched.step()
-    val = evaluate(model, val_shards, device, args.batch_size)
+    val = evaluate(model, val_shards, device, args.batch_size, args.cp_scale)
     secs = time.time() - start
     log["epochs"].append(
       {"epoch": epoch + 1, "train_mse": total / count, "val_mse": val, "positions": count, "secs": secs}

@@ -92,3 +92,17 @@ def test_uci_evalfile_option(tmp_path):
   assert "option name EvalFile type string default <empty>" in lines
   assert "readyok" in lines
   assert chess.Move.from_uci(lines[-1].split()[1]) in chess.Board().legal_moves
+
+
+def test_cp_scale_from_the_weights_file(tmp_path):
+  import math
+
+  path = random_net(tmp_path / "n.npz")
+  default = NetEvaluator(path)
+  assert default.cp_per_logit == pytest.approx(400 / math.log(10))
+  d = dict(np.load(path))
+  np.savez(tmp_path / "wide.npz", **d, cp_scale=1000.0)
+  wide = NetEvaluator(tmp_path / "wide.npz")
+  assert wide.cp_per_logit == pytest.approx(1000 / math.log(10))
+  board = chess.Board("r1bq1rk1/pp2bppp/2n1pn2/3p4/2PP4/2N1PN2/PP1B1PPP/R2QKB1R w KQ - 0 8")
+  assert wide.logit(board) == default.logit(board)

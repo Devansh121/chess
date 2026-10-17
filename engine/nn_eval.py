@@ -2,7 +2,7 @@
 
 Weights come from scripts/export_net.py. The network outputs a logit for the side to move's win
 probability; it is converted to centipawns with the inverse of the training target
-p = 1 / (1 + 10^(-cp/400)), i.e. cp = logit * 400 / ln(10).
+p = 1 / (1 + 10^(-cp/scale)), i.e. cp = logit * scale / ln(10), using the scale stored with the weights.
 """
 
 import math
@@ -12,7 +12,7 @@ import numpy as np
 
 from nn.features import NUM_FEATURES, feature_index
 
-CP_PER_LOGIT = 400 / math.log(10)
+DEFAULT_CP_SCALE = 400.0  # nets exported before cp_scale was stored were trained with this
 CP_LIMIT = 5000  # keep network scores well clear of mate scores
 
 
@@ -25,6 +25,8 @@ class NetEvaluator:
     self.b2 = d["b2"].astype(np.float32)
     self.w3 = d["w3"].astype(np.float32)  # [H2]
     self.b3 = float(d["b3"])
+    # Inverse of the training target p = 1 / (1 + 10^(-cp/scale)): cp = logit * scale / ln(10)
+    self.cp_per_logit = float(d["cp_scale"]) / math.log(10) if "cp_scale" in d else DEFAULT_CP_SCALE / math.log(10)
     if self.w1.shape[0] != NUM_FEATURES + 1:
       raise ValueError(f"{path}: expected {NUM_FEATURES + 1} input rows, got {self.w1.shape[0]}")
 
@@ -42,5 +44,5 @@ class NetEvaluator:
 
   def __call__(self, board):
     """Centipawns for the side to move."""
-    cp = int(self.logit(board) * CP_PER_LOGIT)
+    cp = int(self.logit(board) * self.cp_per_logit)
     return max(-CP_LIMIT, min(CP_LIMIT, cp))
