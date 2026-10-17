@@ -30,6 +30,8 @@ class TT {
   void new_search() { generation_++; }
   // Copies the entry for this key into `out`; false if there is none.
   bool probe(U64 key, TTEntry& out) const;
+  // Start loading the slot for `key` into cache (call as soon as a child position's hash is known).
+  void prefetch(U64 key) const { __builtin_prefetch(&table_[key & mask_]); }
   void store(U64 key, Move move, int score, int depth, Bound bound);
   // Permille of sampled slots in use, for UCI "hashfull".
   int hashfull() const;
