@@ -1,0 +1,15 @@
+[project]
+name = "chess-engine"
+version = "0.0.0"
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 120
+indent-width = 2
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
