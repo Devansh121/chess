@@ -16,6 +16,7 @@ constexpr int ORDER_HASH = 10'000'000;
 constexpr int ORDER_CAPTURE = 1'000'000;
 constexpr int ORDER_PROMOTION = 900'000;
 constexpr int ORDER_KILLER = 800'000;
+constexpr int ORDER_BAD_CAPTURE = 100'000;  // captures that lose material (SEE < 0): after killers, before quiet moves
 
 int mvv_lva(const Position& pos, Move m) {
   int victim = move_flag(m) == EP_CAPTURE ? PAWN : piece_type(pos.board[move_to(m)]);
@@ -101,7 +102,7 @@ void Searcher::order_moves(const Position& pos, Move* moves, int n, Move hash_mo
     if (m == hash_move)
       s = ORDER_HASH;
     else if (is_capture(m))
-      s = ORDER_CAPTURE + mvv_lva(pos, m);
+      s = (see(pos, m) >= 0 ? ORDER_CAPTURE : ORDER_BAD_CAPTURE) + mvv_lva(pos, m);
     else if (is_promotion(m) && promotion_type(m) == QUEEN)
       s = ORDER_PROMOTION;
     else if (ply < MAX_PLY && m == killers_[ply][0])
