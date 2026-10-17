@@ -132,9 +132,11 @@ def test_cpp_engine_matches_torch(tmp_path, arch):
   for fen in FENS:
     script += f"position fen {fen}\neval\n"
   out = subprocess.run([binary], input=script + "quit\n", capture_output=True, text=True, timeout=30).stdout
-  logits = [float(line.split("logit ")[1]) for line in out.splitlines() if line.startswith("eval ")]
-  assert len(logits) == len(FENS), out
+  rows = [line.split() for line in out.splitlines() if line.startswith("eval ")]
+  assert len(rows) == len(FENS), out
   with torch.no_grad():
-    for fen, got in zip(FENS, logits, strict=True):
+    for fen, row in zip(FENS, rows, strict=True):
+      quantized, reference = float(row[row.index("logit") + 1]), float(row[row.index("float") + 1])
       expected = model(to_model_input(np.array([pack(fen_features(fen))]))).item()
-      assert got == pytest.approx(expected, abs=1e-4), fen
+      assert reference == pytest.approx(expected, abs=1e-4), fen  # float path: same maths as PyTorch
+      assert quantized == pytest.approx(expected, abs=0.05), fen  # int16 path: rounding only
