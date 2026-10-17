@@ -51,7 +51,7 @@ class Searcher {
   int negamax(const Position& pos, int depth, int alpha, int beta, int ply, bool allow_null = true);
   int pvs(const Position& next, int depth, int alpha, int beta, int ply, bool first);
   int quiesce(const Position& pos, int alpha, int beta, int ply);
-  int root_search(const Position& pos, int depth, Move prev_best, Move& best);
+  int root_search(const Position& pos, int depth, Move prev_best, Move& best, int alpha, int beta);
   bool is_draw(const Position& pos, int ply) const;
   bool time_up();
   void order_moves(const Position& pos, Move* moves, int n, Move hash_move, int ply) const;

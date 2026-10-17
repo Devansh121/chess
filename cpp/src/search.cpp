@@ -258,11 +258,12 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
   return alpha;
 }
 
-int Searcher::root_search(const Position& pos, int depth, Move prev_best, Move& best) {
+// Searches every root move inside (alpha, beta). Returns alpha if nothing beat it (fail low, best stays
+// NO_MOVE) and beta as soon as a move reaches it (fail high, best is that move).
+int Searcher::root_search(const Position& pos, int depth, Move prev_best, Move& best, int alpha, int beta) {
   MoveList list;
   generate_legal(pos, list);
   order_moves(pos, list.moves, list.size, prev_best, 0);
-  int alpha = -INF, beta = INF;
   best = NO_MOVE;
   int searched = 0;
   for (Move m : list) {
@@ -275,6 +276,7 @@ int Searcher::root_search(const Position& pos, int depth, Move prev_best, Move& 
     if (score > alpha) {
       alpha = score;
       best = m;
+      if (alpha >= beta) return beta;
     }
   }
   return alpha;
@@ -313,8 +315,30 @@ SearchResult Searcher::search(const Position& root, const std::vector<U64>& hist
 
   for (int depth = 1; depth <= limits.depth; depth++) {
     can_abort_ = depth > 1;
-    Move best;
-    int score = root_search(root, depth, result.depth ? result.best : NO_MOVE, best);
+    Move best = NO_MOVE;
+    Move prev = result.depth ? result.best : NO_MOVE;
+    int score;
+    if (depth >= 5) {
+      // Aspiration window around the previous score; widen the failing side and re-search on a miss.
+      int delta = 50;
+      int a = std::max(result.score - delta, -INF), b = std::min(result.score + delta, INF);
+      for (;;) {
+        score = root_search(root, depth, prev, best, a, b);
+        if (aborted_) break;
+        if (score <= a) {
+          a = std::max(a - delta, -INF);
+        } else if (score >= b) {
+          b = std::min(b + delta, INF);
+          prev = best;  // the fail-high move goes first in the re-search
+        } else {
+          break;
+        }
+        delta *= 2;
+        if (delta > 1000) a = -INF, b = INF;
+      }
+    } else {
+      score = root_search(root, depth, prev, best, -INF, INF);
+    }
     if (aborted_) break;
     result.best = best;
     result.score = score;
