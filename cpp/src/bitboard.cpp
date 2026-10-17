@@ -16,6 +16,8 @@ namespace {
 std::vector<U64> rook_table;
 std::vector<U64> bishop_table;
 
+#include "magics.inc"
+
 // Squares reached by stepping (df, dr) from sq, if still on the board.
 U64 step(int sq, int df, int dr) {
   int f = file_of(sq) + df, r = rank_of(sq) + dr;
@@ -51,7 +53,24 @@ struct Rng {
   U64 sparse() { return next() & next() & next(); }  // few set bits make good magic candidates
 };
 
-void init_magics(bool rook, Magic* magics, std::vector<U64>& table, Rng& rng) {
+// Fills m.attacks for `magic`; false if two blocker sets with different attacks collide.
+bool try_magic(Magic& m, U64 magic, const std::vector<U64>& occs, const std::vector<U64>& atts,
+               std::vector<uint32_t>& stamp, uint32_t attempt) {
+  m.magic = magic;
+  for (size_t i = 0; i < occs.size(); i++) {
+    U64 idx = m.index(occs[i]);
+    // Two blocker sets may share a slot only if they give the same attacks.
+    if (stamp[idx] != attempt) {
+      stamp[idx] = attempt;
+      m.attacks[idx] = atts[i];
+    } else if (m.attacks[idx] != atts[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void init_magics(bool rook, Magic* magics, std::vector<U64>& table, Rng& rng, const U64* known) {
   // Size the shared table first so per-square pointers stay valid.
   size_t total = 0;
   for (int sq = 0; sq < 64; sq++) total += size_t(1) << popcount(relevant_mask(sq, rook));
@@ -80,22 +99,13 @@ void init_magics(bool rook, Magic* magics, std::vector<U64>& table, Rng& rng) {
     m.shift = 64 - bits;
     m.attacks = &table[offset];
     stamp.assign(size, 0);
-    for (uint32_t attempt = 1;; attempt++) {
-      U64 magic = rng.sparse();
-      if (popcount((mask * magic) & 0xFF00000000000000ULL) < 6) continue;  // quick reject of weak candidates
-      m.magic = magic;
-      bool ok = true;
-      for (size_t i = 0; i < occs.size() && ok; i++) {
-        U64 idx = m.index(occs[i]);
-        // Two blocker sets may share a slot only if they give the same attacks.
-        if (stamp[idx] != attempt) {
-          stamp[idx] = attempt;
-          m.attacks[idx] = atts[i];
-        } else if (m.attacks[idx] != atts[i]) {
-          ok = false;
-        }
+    uint32_t attempt = 1;
+    if (!known || !try_magic(m, known[sq], occs, atts, stamp, attempt++)) {
+      for (;; attempt++) {
+        U64 magic = rng.sparse();
+        if (popcount((mask * magic) & 0xFF00000000000000ULL) < 6) continue;  // quick reject of weak candidates
+        if (try_magic(m, magic, occs, atts, stamp, attempt)) break;
       }
-      if (ok) break;
     }
     offset += size;
   }
@@ -131,8 +141,8 @@ void init() {
     pawn_attacks[BLACK][sq] = step(sq, -1, -1) | step(sq, 1, -1);
   }
   Rng rng{0x9E3779B97F4A7C15ULL};
-  init_magics(true, rook_magics, rook_table, rng);
-  init_magics(false, bishop_magics, bishop_table, rng);
+  init_magics(true, rook_magics, rook_table, rng, ROOK_MAGICS);
+  init_magics(false, bishop_magics, bishop_table, rng, BISHOP_MAGICS);
 }
 
 }  // namespace bb
