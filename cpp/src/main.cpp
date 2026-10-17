@@ -1,5 +1,5 @@
 // UCI front end. The search runs on a worker thread so "stop" and "quit" work mid-search.
-// Extra commands: "bench [depth]" (fixed-depth node count over test positions, for regression checks)
+// Extra commands: "bench [depth] [net.nnue]" (fixed-depth node count over test positions, for regression checks)
 // and "perft N" on the current position.
 #include <algorithm>
 #include <chrono>
@@ -63,8 +63,17 @@ double allocate_ms(const Position& pos, double wtime, double btime, double winc,
   return std::max(5.0, std::min(t, remaining / 3) - 10);  // leave a little for overhead
 }
 
-void bench(int depth) {
+void bench(int depth, const std::string& net_file) {
   Searcher s(16);
+  nnue::Network net;
+  if (!net_file.empty()) {
+    std::string err = net.load(net_file);
+    if (!err.empty()) {
+      std::printf("bench: %s\n", err.c_str());
+      return;
+    }
+    s.set_network(&net);
+  }
   U64 total = 0;
   auto start = std::chrono::steady_clock::now();
   for (const char* fen : BENCH_FENS) {
@@ -88,7 +97,7 @@ int main(int argc, char** argv) {
   eval::init();
 
   if (argc > 1 && std::string(argv[1]) == "bench") {
-    bench(argc > 2 ? std::atoi(argv[2]) : 7);
+    bench(argc > 2 ? std::atoi(argv[2]) : 7, argc > 3 ? argv[3] : "");
     return 0;
   }
 
@@ -211,9 +220,11 @@ int main(int argc, char** argv) {
       if (!eval_file.empty()) {
         nnue::Accumulator acc;
         nnue::refresh(network, pos, acc);
-        char buf[96];
-        std::snprintf(buf, sizeof(buf), " network %d logit %.6f", nnue::evaluate(network, acc, pos.side),
-                      nnue::logit(network, acc, pos.side));
+        nnue::FloatAccumulator ref;
+        nnue::refresh_float(network, pos, ref);
+        char buf[128];
+        std::snprintf(buf, sizeof(buf), " network %d logit %.6f float %.6f", nnue::evaluate(network, acc, pos.side),
+                      nnue::logit(network, acc, pos.side), nnue::logit_float(network, ref, pos.side));
         line_out += buf;
       }
       send(line_out);

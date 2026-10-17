@@ -50,18 +50,23 @@ std::string write_random_net(int arch, int h1, int h2) {
   return path;
 }
 
-float max_diff(const nnue::Network& net, const nnue::Accumulator& a, const nnue::Accumulator& b) {
-  float d = 0;
+int max_diff(const nnue::Network& net, const nnue::Accumulator& a, const nnue::Accumulator& b) {
+  int d = 0;
   for (int p = 0; p < 2; p++)
-    for (int i = 0; i < net.hidden1; i++) d = std::max(d, std::fabs(a.v[p][i] - b.v[p][i]));
+    for (int i = 0; i < net.hidden1; i++) d = std::max(d, std::abs(int(a.v[p][i]) - int(b.v[p][i])));
   return d;
 }
 
 // Walk the legal move tree; at every node compare the incrementally updated accumulator with a refresh.
-float walk(const nnue::Network& net, const Position& pos, const nnue::Accumulator& acc, int depth, long& nodes) {
+// Also tracks the largest gap between the quantized and float-reference outputs.
+int walk(const nnue::Network& net, const Position& pos, const nnue::Accumulator& acc, int depth, long& nodes,
+         float& worst_quant) {
   nnue::Accumulator fresh;
   nnue::refresh(net, pos, fresh);
-  float worst = max_diff(net, acc, fresh);
+  int worst = max_diff(net, acc, fresh);
+  nnue::FloatAccumulator ref;
+  nnue::refresh_float(net, pos, ref);
+  worst_quant = std::max(worst_quant, std::fabs(nnue::logit(net, acc, pos.side) - nnue::logit_float(net, ref, pos.side)));
   nodes++;
   if (depth == 0) return worst;
   MoveList list;
@@ -70,7 +75,7 @@ float walk(const nnue::Network& net, const Position& pos, const nnue::Accumulato
     Position next = pos.make(m);
     nnue::Accumulator child;
     nnue::update(net, pos, next, acc, child);
-    worst = std::max(worst, walk(net, next, child, depth - 1, nodes));
+    worst = std::max(worst, walk(net, next, child, depth - 1, nodes, worst_quant));
   }
   return worst;
 }
@@ -110,9 +115,12 @@ int main() {
       nnue::Accumulator acc;
       nnue::refresh(net, pos, acc);
       long nodes = 0;
-      float worst = walk(net, pos, acc, 3, nodes);
-      check(worst < 1e-3f, "arch " + std::to_string(arch) + " incremental == refresh over " + std::to_string(nodes) +
-                               " nodes (max diff " + std::to_string(worst) + "): " + fen);
+      float worst_quant = 0;
+      int worst = walk(net, pos, acc, 3, nodes, worst_quant);
+      check(worst == 0, "arch " + std::to_string(arch) + " incremental == refresh exactly over " +
+                            std::to_string(nodes) + " nodes: " + fen);
+      check(worst_quant < 0.02f, "arch " + std::to_string(arch) + " quantized within 0.02 of float logit (max " +
+                                     std::to_string(worst_quant) + ")");
       Position flipped = colour_flipped(pos);
       nnue::Accumulator a2;
       nnue::refresh(net, flipped, a2);
