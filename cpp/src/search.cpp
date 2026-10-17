@@ -1,6 +1,7 @@
 #include "search.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <string>
 
@@ -20,6 +21,15 @@ int mvv_lva(const Position& pos, Move m) {
   int attacker = piece_type(pos.board[move_from(m)]);
   return eval::PIECE_VALUE[victim] * 10 - eval::PIECE_VALUE[attacker] / 10;
 }
+
+// Late-move reduction in plies, by remaining depth and number of moves already searched.
+int lmr_table[64][64];
+struct LmrInit {
+  LmrInit() {
+    for (int d = 1; d < 64; d++)
+      for (int m = 1; m < 64; m++) lmr_table[d][m] = int(0.75 + std::log(d) * std::log(m) / 2.25);
+  }
+} lmr_init;
 
 // Mate scores are stored relative to the node so they stay correct when reached by another path.
 int to_tt(int score, int ply) { return score > MATE_BOUND ? score + ply : score < -MATE_BOUND ? score - ply : score; }
@@ -188,11 +198,25 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
   int alpha_orig = alpha;
   Move best = NO_MOVE;
   int searched = 0;
+  bool in_check = pos.in_check();
   for (Move m : list) {
     if (!is_legal(pos, m)) continue;
     Position next = pos.make(m);
     stack_.push_back(next.hash);
-    int score = pvs(next, depth - 1, alpha, beta, ply + 1, searched == 0);
+    int score;
+    // Late-move reductions: quiet moves sorted late are rarely best, so search them shallower first
+    // with a zero window; if one beats alpha anyway, it gets the normal search.
+    bool quiet = !is_capture(m) && !is_promotion(m);
+    bool killer = ply < MAX_PLY && (m == killers_[ply][0] || m == killers_[ply][1]);
+    if (searched >= 3 && depth >= 3 && quiet && !killer && !in_check && !next.in_check()) {
+      int r = lmr_table[std::min(depth, 63)][std::min(searched, 63)];
+      if (pv_node) r = std::max(0, r - 1);
+      int reduced = std::max(1, depth - 1 - r);
+      score = -negamax(next, reduced, -alpha - 1, -alpha, ply + 1);
+      if (score > alpha && reduced < depth - 1 && !aborted_) score = pvs(next, depth - 1, alpha, beta, ply + 1, false);
+    } else {
+      score = pvs(next, depth - 1, alpha, beta, ply + 1, searched == 0);
+    }
     searched++;
     stack_.pop_back();
     if (aborted_) return 0;
