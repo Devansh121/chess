@@ -1,7 +1,6 @@
-# nnue-chess
+# chess
 
-A small chess engine: an NNUE-style value network trained on Stockfish-evaluated
-positions, driven by an alpha-beta search. Inspired by George Hotz's
+A small chess engine. Inspired by George Hotz's
 [twitchchess](https://github.com/geohot/twitchchess) streams (2018), rebuilt from scratch.
 
 ## Baseline (twitchchess, measured on an RTX 4050 laptop, CPython)
@@ -14,7 +13,7 @@ positions, driven by an alpha-beta search. Inspired by George Hotz's
 Estimated strength: ~600-900 (Part 1 net), ~1000-1300 (master). To be measured
 against Stockfish `UCI_LimitStrength` before anything else.
 
-## Plan
+## Plan (current direction, will change)
 
 1. **Baseline harness** - play engines vs Stockfish 17.1 at fixed `UCI_Elo`, report score and Elo estimate.
 2. **Data** - stream Lichess's evaluated-positions database, convert ~50M positions into compact arrays
