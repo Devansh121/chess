@@ -100,6 +100,8 @@ void bench(int depth, const std::string& net_file) {
 
 }  // namespace
 
+int run_datagen(int argc, char** argv);  // datagen.cpp
+
 int main(int argc, char** argv) {
   Position::init();
   eval::init();
@@ -108,6 +110,7 @@ int main(int argc, char** argv) {
     bench(argc > 2 ? std::atoi(argv[2]) : 7, argc > 3 ? argv[3] : "");
     return 0;
   }
+  if (argc > 1 && std::string(argv[1]) == "datagen") return run_datagen(argc, argv);
 
   Searcher searcher(64);
   nnue::Network network;

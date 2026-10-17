@@ -45,7 +45,7 @@ else()
   message(STATUS "No network at ${EMBED_NET_FILE}; building without an embedded network")
 endif()
 
-add_executable(chess-engine src/main.cpp)
+add_executable(chess-engine src/main.cpp src/datagen.cpp)
 target_link_libraries(chess-engine engine_core pthread)
 
 add_executable(perft_test tests/perft_test.cpp)
