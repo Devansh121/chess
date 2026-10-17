@@ -139,6 +139,15 @@ int Searcher::quiesce(const Position& pos, int alpha, int beta, int ply) {
   return alpha;
 }
 
+// Principal variation search for one child: the first move gets the full window; later moves get a
+// zero-width window that only proves "not better than alpha", and are re-searched if that fails.
+int Searcher::pvs(const Position& next, int depth, int alpha, int beta, int ply, bool first) {
+  if (first || beta - alpha == 1) return -negamax(next, depth, -beta, -alpha, ply);
+  int score = -negamax(next, depth, -alpha - 1, -alpha, ply);
+  if (score > alpha && score < beta && !aborted_) score = -negamax(next, depth, -beta, -alpha, ply);
+  return score;
+}
+
 int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int ply) {
   nodes_++;
   if (time_up()) {
@@ -163,13 +172,13 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
   order_moves(pos, list.moves, list.size, hash_move, ply);
   int alpha_orig = alpha;
   Move best = NO_MOVE;
-  bool any_legal = false;
+  int searched = 0;
   for (Move m : list) {
     if (!is_legal(pos, m)) continue;
-    any_legal = true;
     Position next = pos.make(m);
     stack_.push_back(next.hash);
-    int score = -negamax(next, depth - 1, -beta, -alpha, ply + 1);
+    int score = pvs(next, depth - 1, alpha, beta, ply + 1, searched == 0);
+    searched++;
     stack_.pop_back();
     if (aborted_) return 0;
     if (score >= beta) {
@@ -185,7 +194,7 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
       best = m;
     }
   }
-  if (!any_legal) return pos.in_check() ? -(MATE - ply) : 0;
+  if (searched == 0) return pos.in_check() ? -(MATE - ply) : 0;
   tt_.store(pos.hash, best, to_tt(alpha, ply), depth, alpha > alpha_orig ? BOUND_EXACT : BOUND_UPPER);
   return alpha;
 }
@@ -196,10 +205,12 @@ int Searcher::root_search(const Position& pos, int depth, Move prev_best, Move& 
   order_moves(pos, list.moves, list.size, prev_best, 0);
   int alpha = -INF, beta = INF;
   best = NO_MOVE;
+  int searched = 0;
   for (Move m : list) {
     Position next = pos.make(m);
     stack_.push_back(next.hash);
-    int score = -negamax(next, depth - 1, -beta, -alpha, 1);
+    int score = pvs(next, depth - 1, alpha, beta, 1, searched == 0);
+    searched++;
     stack_.pop_back();
     if (aborted_) return 0;
     if (score > alpha) {
