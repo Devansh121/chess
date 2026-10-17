@@ -8,3 +8,5 @@ runs/
 *.npz
 *.bin
 *.zst
+nets/*.pt
+nets/*.json
