@@ -391,6 +391,8 @@ SearchResult Searcher::search(const Position& root, const std::vector<U64>& hist
   if (legal.size == 0) return result;
   result.best = legal.moves[0];
 
+  double time_scale = 1.0;
+  Move prev_best_move = NO_MOVE;
   for (int depth = 1; depth <= limits.depth; depth++) {
     can_abort_ = depth > 1;
     Move best = NO_MOVE;
@@ -428,6 +430,15 @@ SearchResult Searcher::search(const Position& root, const std::vector<U64>& hist
     }
     // A mate the search has fully proven won't change with more depth.
     if ((score > MATE_BOUND && (MATE - score) <= depth) || (score < -MATE_BOUND && (MATE + score) <= depth)) break;
+    // Soft time limit: an iteration usually takes longer than all previous ones together, so don't start
+    // one past half the target. A changed best move means the position is unclear: allow more time.
+    if (limits.soft_ms > 0) {
+      bool changed = depth > 1 && best != prev_best_move;
+      time_scale = std::clamp(time_scale * (changed ? 1.3 : 0.92), 0.7, 2.5);
+      double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start_).count();
+      if (ms >= 0.5 * limits.soft_ms * time_scale) break;
+    }
+    prev_best_move = best;
   }
   result.nodes = nodes_;
   return result;

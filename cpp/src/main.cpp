@@ -54,14 +54,19 @@ void print_info(const SearchInfo& info) {
        pv);
 }
 
-// Time to spend on this move, from the "go" arguments.
-double allocate_ms(const Position& pos, double wtime, double btime, double winc, double binc, int movestogo) {
+// Soft and hard time limits for this move from the clock: the soft target is an even share of the
+// remaining time plus most of the increment; the hard limit allows stretching it in unclear positions
+// but never more than 30% of what is left.
+void allocate_ms(const Position& pos, double wtime, double btime, double winc, double binc, int movestogo,
+                 SearchLimits& limits) {
   double remaining = pos.side == WHITE ? wtime : btime;
   double inc = pos.side == WHITE ? winc : binc;
-  if (remaining <= 0) return 0;
-  int mtg = movestogo > 0 ? movestogo : 30;
-  double t = remaining / mtg + 0.8 * inc;
-  return std::max(5.0, std::min(t, remaining / 3) - 10);  // leave a little for overhead
+  if (remaining <= 0) return;
+  int mtg = movestogo > 0 ? movestogo : 40;
+  double soft = remaining / mtg + 0.75 * inc;
+  double hard = std::min(remaining * 0.3, soft * 4) - 10;  // leave a little for overhead
+  limits.time_ms = std::max(5.0, hard);
+  limits.soft_ms = std::max(5.0, std::min(soft, limits.time_ms));
 }
 
 void bench(int depth, const std::string& net_file) {
@@ -214,7 +219,7 @@ int main(int argc, char** argv) {
         else if (tok == "binc") in >> binc;
         else if (tok == "movestogo") in >> movestogo;
       }
-      if (limits.time_ms == 0) limits.time_ms = allocate_ms(pos, wtime, btime, winc, binc, movestogo);
+      if (limits.time_ms == 0) allocate_ms(pos, wtime, btime, winc, binc, movestogo, limits);
       searcher.stop = false;
       Position root = pos;
       std::vector<U64> hist = history;
