@@ -55,13 +55,20 @@ std::string format_score(int score) {
   return "cp " + std::to_string(score);
 }
 
-Searcher::Searcher(size_t hash_mb) {
-  tt_.resize(hash_mb);
+Searcher::Searcher(size_t hash_mb) : own_tt_(std::make_unique<TT>()), tt_(own_tt_.get()) {
+  tt_->resize(hash_mb);
   new_game();
 }
 
+Searcher::Searcher(TT* shared_tt) : tt_(shared_tt) { clear_history(); }
+
+void Searcher::clear_history() {
+  std::memset(killers_, 0, sizeof(killers_));
+  std::memset(history_, 0, sizeof(history_));
+}
+
 void Searcher::new_game() {
-  tt_.clear();
+  tt_->clear();
   std::memset(killers_, 0, sizeof(killers_));
   std::memset(history_, 0, sizeof(history_));
 }
@@ -158,10 +165,10 @@ int Searcher::quiesce(const Position& pos, int alpha, int beta, int ply) {
   }
   // Quiescence results are stored at depth 0, so any table entry for this position is deep enough.
   Move hash_move = NO_MOVE;
-  if (const TTEntry* e = tt_.probe(pos.hash)) {
-    hash_move = e->move;
-    int s = from_tt(e->score, ply);
-    if (e->bound == BOUND_EXACT || (e->bound == BOUND_LOWER && s >= beta) || (e->bound == BOUND_UPPER && s <= alpha))
+  if (TTEntry e; tt_->probe(pos.hash, e)) {
+    hash_move = e.move;
+    int s = from_tt(e.score, ply);
+    if (e.bound == BOUND_EXACT || (e.bound == BOUND_LOWER && s >= beta) || (e.bound == BOUND_UPPER && s <= alpha))
       return s;
   }
   bool in_check = pos.in_check();
@@ -189,7 +196,7 @@ int Searcher::quiesce(const Position& pos, int alpha, int beta, int ply) {
     stack_.pop_back();
     if (aborted_) return 0;
     if (score >= beta) {
-      tt_.store(pos.hash, m, to_tt(beta, ply), 0, BOUND_LOWER);
+      tt_->store(pos.hash, m, to_tt(beta, ply), 0, BOUND_LOWER);
       return beta;
     }
     if (score > alpha) {
@@ -198,7 +205,7 @@ int Searcher::quiesce(const Position& pos, int alpha, int beta, int ply) {
     }
   }
   if (in_check && !any_legal) return -(MATE - ply);
-  tt_.store(pos.hash, best, to_tt(alpha, ply), 0, alpha > alpha_orig ? BOUND_EXACT : BOUND_UPPER);
+  tt_->store(pos.hash, best, to_tt(alpha, ply), 0, alpha > alpha_orig ? BOUND_EXACT : BOUND_UPPER);
   return alpha;
 }
 
@@ -225,11 +232,11 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
   if (depth <= 0) return quiesce(pos, alpha, beta, ply);
 
   Move hash_move = NO_MOVE;
-  if (const TTEntry* e = tt_.probe(pos.hash)) {
-    hash_move = e->move;
-    if (e->depth >= depth) {
-      int s = from_tt(e->score, ply);
-      if (e->bound == BOUND_EXACT || (e->bound == BOUND_LOWER && s >= beta) || (e->bound == BOUND_UPPER && s <= alpha))
+  if (TTEntry e; tt_->probe(pos.hash, e)) {
+    hash_move = e.move;
+    if (e.depth >= depth) {
+      int s = from_tt(e.score, ply);
+      if (e.bound == BOUND_EXACT || (e.bound == BOUND_LOWER && s >= beta) || (e.bound == BOUND_UPPER && s <= alpha))
         return s;
     }
   }
@@ -302,7 +309,7 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
     stack_.pop_back();
     if (aborted_) return 0;
     if (score >= beta) {
-      tt_.store(pos.hash, m, to_tt(beta, ply), depth, BOUND_LOWER);
+      tt_->store(pos.hash, m, to_tt(beta, ply), depth, BOUND_LOWER);
       if (quiet) {
         if (ply < MAX_PLY && killers_[ply][0] != m) {
           killers_[ply][1] = killers_[ply][0];
@@ -322,7 +329,7 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
   }
   if (legal == 0) return in_check ? -(MATE - ply) : 0;
   if (searched == 0) return alpha;  // every legal move was pruned: a fail low, not a mate or stalemate
-  tt_.store(pos.hash, best, to_tt(alpha, ply), depth, alpha > alpha_orig ? BOUND_EXACT : BOUND_UPPER);
+  tt_->store(pos.hash, best, to_tt(alpha, ply), depth, alpha > alpha_orig ? BOUND_EXACT : BOUND_UPPER);
   return alpha;
 }
 
@@ -354,13 +361,13 @@ std::vector<Move> Searcher::extract_pv(const Position& root, Move first, int max
   std::vector<Move> pv{first};
   Position pos = root.make(first);
   for (int i = 1; i < max_len; i++) {
-    const TTEntry* e = tt_.probe(pos.hash);
-    if (!e || e->move == NO_MOVE) break;
+    TTEntry e;
+    if (!tt_->probe(pos.hash, e) || e.move == NO_MOVE) break;
     MoveList legal;
     generate_legal(pos, legal);
-    if (std::find(legal.begin(), legal.end(), e->move) == legal.end()) break;
-    pv.push_back(e->move);
-    pos = pos.make(e->move);
+    if (std::find(legal.begin(), legal.end(), e.move) == legal.end()) break;
+    pv.push_back(e.move);
+    pos = pos.make(e.move);
   }
   return pv;
 }
@@ -376,7 +383,7 @@ SearchResult Searcher::search(const Position& root, const std::vector<U64>& hist
   stack_.push_back(root.hash);
   enter(root, 0);
   eval_stack_[0] = root.in_check() ? -INF : evaluate(root, 0);
-  tt_.new_search();
+  tt_->new_search();
 
   SearchResult result;
   MoveList legal;
