@@ -75,6 +75,7 @@ class Searcher {
   std::vector<nnue::Accumulator> acc_ = std::vector<nnue::Accumulator>(ACC_STACK);
   const Position* pos_at_[ACC_STACK] = {};
   bool acc_valid_[ACC_STACK] = {};
+  int eval_stack_[ACC_STACK] = {};  // static eval per ply on the current path (-INF when in check)
 
   TT tt_;
   Move killers_[MAX_PLY][2];
