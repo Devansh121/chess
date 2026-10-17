@@ -13,6 +13,7 @@ env:
   STOCKFISH    path to the Stockfish binary (default ~/.local/share/stockfish/stockfish-17.1)
   TWITCHCHESS  path to a geohot/twitchchess checkout (needed for tc-* engines)
 """
+
 import argparse
 import contextlib
 import io
@@ -70,11 +71,13 @@ class TwitchchessNet:
 
   def __init__(self):
     import torch
+
     torch.set_num_threads(1)
     sys.path.insert(0, TWITCHCHESS)
     with in_twitchchess():
       from state import State
       from train import Net
+
       self.model = Net()
       self.model.load_state_dict(torch.load("nets/value.pth", map_location="cpu"))
     self.model.eval()
@@ -168,18 +171,22 @@ def main():
     losses += a_score == 0.0
     if pgn:
       game = chess.pgn.Game.from_board(board)
-      game.headers.update({"White": args.a if a_white else args.b,
-                           "Black": args.b if a_white else args.a,
-                           "Result": result})
+      game.headers.update(
+        {"White": args.a if a_white else args.b, "Black": args.b if a_white else args.a, "Result": result}
+      )
       with open(pgn, "a") as f:
         print(game, file=f, end="\n\n")
-    print(f"game {i + 1}/{args.games}: {args.a} {'WDL'[[1.0, 0.5, 0.0].index(a_score)]} "
-          f"({len(board.move_stack)} plies)  +{wins} ={draws} -{losses}  {time.time() - start:.0f}s", flush=True)
+    print(
+      f"game {i + 1}/{args.games}: {args.a} {'WDL'[[1.0, 0.5, 0.0].index(a_score)]} "
+      f"({len(board.move_stack)} plies)  +{wins} ={draws} -{losses}  {time.time() - start:.0f}s",
+      flush=True,
+    )
 
   score = wins + 0.5 * draws
   bound, diff = elo_diff(score, args.games)
-  print(f"FINAL {args.a} vs {args.b}: +{wins} ={draws} -{losses}  "
-        f"score {score}/{args.games}  Elo diff {bound}{diff:+.0f}")
+  print(
+    f"FINAL {args.a} vs {args.b}: +{wins} ={draws} -{losses}  score {score}/{args.games}  Elo diff {bound}{diff:+.0f}"
+  )
   a.close()
   b.close()
 

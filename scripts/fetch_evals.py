@@ -8,6 +8,7 @@ usage:
   curl -s https://database.lichess.org/lichess_db_eval.jsonl.zst \
     | zstd -dc | python3 scripts/fetch_evals.py 50000000 | zstd -q -o data/evals.tsv.zst
 """
+
 import json
 import sys
 
