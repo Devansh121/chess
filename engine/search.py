@@ -8,7 +8,8 @@ import time
 
 import chess
 
-from engine.eval import PIECE_VALUE, evaluate
+from engine.eval import PIECE_VALUE
+from engine.eval import evaluate as evaluate_hce
 
 MATE = 100_000
 MATE_BOUND = MATE - 1000  # anything above this is a forced mate
@@ -59,7 +60,9 @@ def mate_in(score):
 
 
 class Searcher:
-  def __init__(self, use_tt=True):
+  def __init__(self, use_tt=True, evaluate=None):
+    """`evaluate(board)` -> centipawns for the side to move; defaults to the hand-written evaluation."""
+    self.evaluate = evaluate or evaluate_hce
     self.nodes = 0
     self.deadline = None
     self.stop = False
@@ -206,7 +209,7 @@ class Searcher:
       if not moves:
         return -(MATE - ply)
     else:
-      stand_pat = evaluate(board)
+      stand_pat = self.evaluate(board)
       if stand_pat >= beta:
         return beta
       if stand_pat > alpha:
