@@ -7,6 +7,7 @@
 
 #include "eval.h"
 #include "movegen.h"
+#include "see.h"
 
 namespace {
 
@@ -145,6 +146,7 @@ int Searcher::quiesce(const Position& pos, int alpha, int beta, int ply) {
   bool any_legal = false;
   for (Move m : list) {
     if (!in_check && !is_capture(m)) continue;  // quiet queen promotions are not searched here (as in stage D)
+    if (!in_check && see(pos, m) < 0) continue;  // captures that lose material are never the best way out
     if (!is_legal(pos, m)) continue;
     any_legal = true;
     Position next = pos.make(m);

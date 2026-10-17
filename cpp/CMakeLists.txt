@@ -27,6 +27,7 @@ add_library(engine_core STATIC
   src/eval.cpp
   src/tt.cpp
   src/search.cpp
+  src/see.cpp
 )
 target_include_directories(engine_core PUBLIC src)
 

@@ -6,6 +6,7 @@
 #include "../src/eval.h"
 #include "../src/movegen.h"
 #include "../src/search.h"
+#include "../src/see.h"
 
 namespace {
 
@@ -114,6 +115,32 @@ int main() {
     check(eval::evaluate_white(p) == ref.white,
           std::string("matches Python eval (") + std::to_string(eval::evaluate_white(p)) + " vs " +
               std::to_string(ref.white) + "): " + ref.fen);
+  }
+
+  // Static exchange evaluation on hand-built positions.
+  struct SeeCase {
+    const char* fen;
+    const char* move;
+    int expected;
+    const char* what;
+  } see_cases[] = {
+      {"4k3/8/8/4n3/8/8/8/4RK2 w - - 0 1", "e1e5", 320, "undefended knight"},
+      {"4k3/8/3p4/4p3/8/8/8/4RK2 w - - 0 1", "e1e5", -400, "rook takes a pawn defended by a pawn"},
+      {"4k3/8/5p2/4n3/3P4/8/8/4K3 w - - 0 1", "d4e5", 220, "pawn takes a knight defended by a pawn"},
+      {"4r1k1/8/8/4p3/8/8/4R3/4RK2 w - - 0 1", "e2e5", 100, "x-ray: the second rook backs up the first"},
+      {"4r1k1/8/8/4p3/8/8/4R3/5K2 w - - 0 1", "e2e5", -400, "same without the backup rook"},
+  };
+  for (auto& c : see_cases) {
+    Position sp;
+    sp.set_fen(c.fen);
+    MoveList l;
+    generate_legal(sp, l);
+    Move mv = NO_MOVE;
+    for (Move m : l)
+      if (move_to_uci(m) == c.move) mv = m;
+    int got = mv == NO_MOVE ? -99999 : see(sp, mv);
+    check(got == c.expected, std::string("SEE ") + c.what + ": " + std::to_string(got) + " (expected " +
+                                 std::to_string(c.expected) + ")");
   }
 
   if (failures) {

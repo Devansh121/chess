@@ -29,6 +29,8 @@ struct Position {
   U64 all() const { return occ[WHITE] | occ[BLACK]; }
   int king_sq(int color) const { return lsb(pieces[color][KING]); }
   bool attacked(int sq, int by) const;
+  // All pieces of both colours attacking `sq`, with `occupied` as the blockers (for exchange evaluation).
+  U64 attackers_to(int sq, U64 occupied) const;
   bool in_check() const { return attacked(king_sq(side), side ^ 1); }
   bool has_non_pawn_material(int color) const {
     return pieces[color][KNIGHT] | pieces[color][BISHOP] | pieces[color][ROOK] | pieces[color][QUEEN];
