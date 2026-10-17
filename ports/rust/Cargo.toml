@@ -9,6 +9,10 @@ license = "MIT"
 path = "src/lib.rs"
 
 [[bin]]
+name = "chess-rs"
+path = "src/bin/uci.rs"
+
+[[bin]]
 name = "perft"
 path = "src/bin/perft.rs"
 
