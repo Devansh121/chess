@@ -61,6 +61,14 @@ Searcher::Searcher(size_t hash_mb) {
 void Searcher::new_game() {
   tt_.clear();
   std::memset(killers_, 0, sizeof(killers_));
+  std::memset(history_, 0, sizeof(history_));
+}
+
+// History gravity: bonuses saturate at +/-HISTORY_MAX, so old information fades as new arrives.
+constexpr int HISTORY_MAX = 16384;
+void Searcher::update_history(int side, Move m, int bonus) {
+  int& h = history_[side][move_from(m)][move_to(m)];
+  h += bonus - h * std::abs(bonus) / HISTORY_MAX;
 }
 
 bool Searcher::time_up() {
@@ -99,6 +107,8 @@ void Searcher::order_moves(const Position& pos, Move* moves, int n, Move hash_mo
       s = ORDER_KILLER;
     else if (ply < MAX_PLY && m == killers_[ply][1])
       s = ORDER_KILLER - 1;
+    else
+      s = history_[pos.side][move_from(m)][move_to(m)];  // in [-HISTORY_MAX, HISTORY_MAX], below killers
     scores[i] = s;
   }
   // Insertion sort, descending (lists are short).
@@ -199,6 +209,8 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
   Move best = NO_MOVE;
   int searched = 0;
   bool in_check = pos.in_check();
+  Move quiets_tried[MAX_MOVES];
+  int n_quiets = 0;
   for (Move m : list) {
     if (!is_legal(pos, m)) continue;
     Position next = pos.make(m);
@@ -222,12 +234,18 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
     if (aborted_) return 0;
     if (score >= beta) {
       tt_.store(pos.hash, m, to_tt(beta, ply), depth, BOUND_LOWER);
-      if (!is_capture(m) && ply < MAX_PLY && killers_[ply][0] != m) {
-        killers_[ply][1] = killers_[ply][0];
-        killers_[ply][0] = m;
+      if (quiet) {
+        if (ply < MAX_PLY && killers_[ply][0] != m) {
+          killers_[ply][1] = killers_[ply][0];
+          killers_[ply][0] = m;
+        }
+        int bonus = std::min(depth * depth, 400);
+        update_history(pos.side, m, bonus);
+        for (int i = 0; i < n_quiets; i++) update_history(pos.side, quiets_tried[i], -bonus);
       }
       return beta;
     }
+    if (quiet) quiets_tried[n_quiets++] = m;
     if (score > alpha) {
       alpha = score;
       best = m;

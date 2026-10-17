@@ -59,6 +59,8 @@ class Searcher {
 
   TT tt_;
   Move killers_[MAX_PLY][2];
+  int history_[2][64][64];  // quiet-move history: bonus for cutoffs, malus for quiets tried before one
+  void update_history(int side, Move m, int bonus);
   std::vector<U64> stack_;  // hashes from the game start to the current node
   size_t root_index_ = 0;
   U64 nodes_ = 0;
