@@ -43,7 +43,7 @@ REPO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 
 
 class Random:
-  def move(self, board):
+  def move(self, board, limit=None):
     return random.choice(list(board.legal_moves))
 
   def close(self):
@@ -56,8 +56,8 @@ class Stockfish:
     self.engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH)
     self.engine.configure({"UCI_LimitStrength": True, "UCI_Elo": elo, "Threads": 1, "Hash": 16})
 
-  def move(self, board):
-    return self.engine.play(board, self.limit).move
+  def move(self, board, limit=None):
+    return self.engine.play(board, limit or self.limit).move
 
   def close(self):
     self.engine.quit()
@@ -70,8 +70,8 @@ class UciEngine:
     self.limit = chess.engine.Limit(nodes=nodes) if nodes else chess.engine.Limit(time=movetime)
     self.engine = chess.engine.SimpleEngine.popen_uci(os.path.abspath(path))
 
-  def move(self, board):
-    return self.engine.play(board, self.limit).move
+  def move(self, board, limit=None):
+    return self.engine.play(board, limit or self.limit).move
 
   def close(self):
     self.engine.quit()
@@ -86,8 +86,8 @@ class Ours:
     if options:
       self.engine.configure(options)
 
-  def move(self, board):
-    return self.engine.play(board, self.limit).move
+  def move(self, board, limit=None):
+    return self.engine.play(board, limit or self.limit).move
 
   def close(self):
     self.engine.quit()
@@ -123,7 +123,7 @@ class TwitchchessNet:
     self.model.eval()
     self.torch, self.State = torch, State
 
-  def move(self, board):
+  def move(self, board, limit=None):
     moves = list(board.legal_moves)
     kids = []
     for m in moves:
@@ -150,7 +150,7 @@ class TwitchchessClassic:
     self.play, self.State = play, State
     self.v = play.ClassicValuator()
 
-  def move(self, board):
+  def move(self, board, limit=None):
     with contextlib.redirect_stdout(io.StringIO()):
       ret = self.play.explore_leaves(self.State(board.copy()), self.v)
     return sorted(ret, key=lambda x: x[0], reverse=board.turn)[0][1]
@@ -206,13 +206,38 @@ def randomized_opening(opening, plies, seed):
   return moves
 
 
-def play_game(white, black, opening=(), max_plies=400):
+def parse_tc(tc):
+  """'10+0.1' -> (10.0, 0.1) seconds; None or '' -> None."""
+  if not tc:
+    return None
+  base, _, inc = tc.partition("+")
+  return float(base), float(inc or 0)
+
+
+def play_game(white, black, opening=(), max_plies=400, tc=None):
+  """Plays one game. With `tc` = (base, increment) seconds both sides play on a clock that the engines see
+  in their limits; running out of time loses (a draw if the opponent has only a king)."""
   board = chess.Board()
   for move in opening:
     board.push(move)
+  clock = {chess.WHITE: tc[0], chess.BLACK: tc[0]} if tc else None
   while not board.is_game_over(claim_draw=True) and len(board.move_stack) < max_plies:
     player = white if board.turn == chess.WHITE else black
-    board.push(player.move(board))
+    if clock is None:
+      board.push(player.move(board))
+      continue
+    limit = chess.engine.Limit(
+      white_clock=clock[chess.WHITE], black_clock=clock[chess.BLACK], white_inc=tc[1], black_inc=tc[1]
+    )
+    side = board.turn
+    start = time.monotonic()
+    move = player.move(board, limit)
+    clock[side] -= time.monotonic() - start
+    if clock[side] < 0:
+      only_king = board.occupied_co[not side] == board.kings & board.occupied_co[not side]
+      return ("1/2-1/2" if only_king else ("0-1" if side == chess.WHITE else "1-0")), board
+    clock[side] += tc[1]
+    board.push(move)
   result = board.result(claim_draw=True)
   return ("1/2-1/2" if result == "*" else result), board
 
@@ -255,8 +280,10 @@ def main():
     "--random-plies", type=int, default=0, help="random moves after each opening; both games of a pair share them"
   )
   ap.add_argument("--seed", type=int, default=0)
+  ap.add_argument("--tc", default="", help="clock time control BASE+INC in seconds, e.g. 10+0.1 (overrides times)")
   args = ap.parse_args()
   openings = load_openings(args.openings)
+  tc = parse_tc(args.tc)
   pgn = os.path.abspath(args.pgn) if args.pgn else None
 
   a = make(args.a, args.movetime, args.our_time, args.nodes)
@@ -269,7 +296,7 @@ def main():
     opening = openings[(i // 2) % len(openings)]
     if args.random_plies:
       opening = randomized_opening(opening, args.random_plies, f"{args.seed}-{i // 2}")
-    result, board = play_game(a, b, opening) if a_white else play_game(b, a, opening)
+    result, board = play_game(a, b, opening, tc=tc) if a_white else play_game(b, a, opening, tc=tc)
     a_score = {"1-0": 1.0, "0-1": 0.0}.get(result, 0.5)
     if not a_white:
       a_score = 1.0 - a_score

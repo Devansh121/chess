@@ -18,7 +18,8 @@ constexpr int INF = MATE + 1;
 
 struct SearchLimits {
   int depth = 64;
-  double time_ms = 0;  // 0 = no time limit
+  double time_ms = 0;  // hard limit, never exceeded; 0 = no time limit
+  double soft_ms = 0;  // target: no new iteration once past half of it (stretched when the best move is unstable)
   U64 nodes = 0;       // 0 = no node limit
 };
 
