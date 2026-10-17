@@ -299,9 +299,9 @@ int Searcher::quiesce(const Position& pos, int alpha, int beta, int ply) {
   for (Move m; (m = picker.next()) != NO_MOVE;) {
     if (!in_check && !is_capture(m)) continue;  // quiet queen promotions are not searched here (as in stage D)
     if (!in_check && see(pos, m) < 0) continue;  // captures that lose material are never the best way out
-    if (!is_legal(pos, m)) continue;
-    any_legal = true;
     Position next = pos.make(m);
+    if (next.attacked(next.king_sq(pos.side), next.side)) continue;  // left our king in check
+    any_legal = true;
     tt_->prefetch(next.hash);
     stack_.push_back(next.hash);
     int score = -quiesce(next, -beta, -alpha, ply + 1);
@@ -390,9 +390,9 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
   Move quiets_tried[MAX_MOVES];
   int n_quiets = 0;
   for (Move m; (m = picker.next()) != NO_MOVE;) {
-    if (!is_legal(pos, m)) continue;
-    legal++;
     Position next = pos.make(m);
+    if (next.attacked(next.king_sq(pos.side), next.side)) continue;  // left our king in check
+    legal++;
     tt_->prefetch(next.hash);
     bool quiet = !is_capture(m) && !is_promotion(m);
     bool gives_check = next.in_check();
