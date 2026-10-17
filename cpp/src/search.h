@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <memory>
 #include <vector>
 
 #include "nnue.h"
@@ -38,11 +39,17 @@ struct SearchResult {
 
 class Searcher {
  public:
+  // A searcher with its own transposition table.
   explicit Searcher(size_t hash_mb = 64);
+  // A searcher sharing `tt` with others (Lazy SMP helper threads).
+  explicit Searcher(TT* shared_tt);
   // Evaluate with this network instead of the hand-written evaluation (nullptr: hand-written).
   void set_network(const nnue::Network* net) { net_ = net; }
   void new_game();
-  void resize_hash(size_t mb) { tt_.resize(mb); }
+  void clear_history();  // killers and history only (helper threads; the shared table is cleared once)
+  void resize_hash(size_t mb) { tt_->resize(mb); }
+  TT* tt() { return tt_; }
+  U64 nodes() const { return nodes_; }
 
   // `history`: hashes of earlier positions in the game (for repetition detection), oldest first.
   SearchResult search(const Position& root, const std::vector<U64>& history, const SearchLimits& limits,
@@ -77,7 +84,8 @@ class Searcher {
   bool acc_valid_[ACC_STACK] = {};
   int eval_stack_[ACC_STACK] = {};  // static eval per ply on the current path (-INF when in check)
 
-  TT tt_;
+  std::unique_ptr<TT> own_tt_;
+  TT* tt_ = nullptr;
   Move killers_[MAX_PLY][2];
   int history_[2][64][64];  // quiet-move history: bonus for cutoffs, malus for quiets tried before one
   void update_history(int side, Move m, int bonus);

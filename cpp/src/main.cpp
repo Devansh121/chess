@@ -3,6 +3,7 @@
 // and "perft N" on the current position.
 #include <algorithm>
 #include <chrono>
+#include <memory>
 #include <cstdio>
 #include <iostream>
 #include <sstream>
@@ -104,6 +105,19 @@ int main(int argc, char** argv) {
   Searcher searcher(64);
   nnue::Network network;
   std::string eval_file;
+  // Lazy SMP: helper searchers share the main searcher's transposition table.
+  std::vector<std::unique_ptr<Searcher>> helpers;
+  auto set_threads = [&](int n) {
+    helpers.clear();
+    for (int i = 1; i < n; i++) {
+      helpers.push_back(std::make_unique<Searcher>(searcher.tt()));
+      helpers.back()->set_network(eval_file.empty() ? nullptr : &network);
+    }
+  };
+  auto set_network_all = [&](const nnue::Network* net) {
+    searcher.set_network(net);
+    for (auto& h : helpers) h->set_network(net);
+  };
   Position pos;
   pos.set_fen(START_FEN);
   std::vector<U64> history;  // hashes of positions before the current one
@@ -124,6 +138,7 @@ int main(int argc, char** argv) {
       send(std::string("id author ") + AUTHOR);
       send("option name Hash type spin default 64 min 1 max 4096");
       send("option name EvalFile type string default <empty>");
+      send("option name Threads type spin default 1 min 1 max 256");
       send("uciok");
     } else if (cmd == "isready") {
       send("readyok");
@@ -132,7 +147,10 @@ int main(int argc, char** argv) {
       in >> tok;  // "name"
       while (in >> tok && tok != "value") name += (name.empty() ? "" : " ") + tok;
       in >> value;
-      if (name == "Hash" && !value.empty()) {
+      if (name == "Threads" && !value.empty()) {
+        stop_search();
+        set_threads(std::clamp(std::stoi(value), 1, 256));
+      } else if (name == "Hash" && !value.empty()) {
         stop_search();
         searcher.resize_hash(std::max(1, std::stoi(value)));
       } else if (name == "EvalFile") {
@@ -141,17 +159,17 @@ int main(int argc, char** argv) {
         std::getline(in, rest);  // paths may contain spaces
         value += rest;
         if (value.empty() || value == "<empty>") {
-          searcher.set_network(nullptr);
+          set_network_all(nullptr);
           eval_file.clear();
           send("info string using the hand-written evaluation");
         } else {
           std::string err = network.load(value);
           if (err.empty()) {
-            searcher.set_network(&network);
             eval_file = value;
+            set_network_all(&network);
             send("info string loaded network " + value);
           } else {
-            searcher.set_network(nullptr);
+            set_network_all(nullptr);
             eval_file.clear();
             send("info string failed to load network: " + err);
           }
@@ -160,6 +178,7 @@ int main(int argc, char** argv) {
     } else if (cmd == "ucinewgame") {
       stop_search();
       searcher.new_game();
+      for (auto& h : helpers) h->clear_history();
     } else if (cmd == "position") {
       stop_search();
       std::string tok;
@@ -199,8 +218,18 @@ int main(int argc, char** argv) {
       searcher.stop = false;
       Position root = pos;
       std::vector<U64> hist = history;
-      worker = std::thread([&searcher, root, hist, limits]() {
+      worker = std::thread([&searcher, &helpers, root, hist, limits]() {
+        // Helpers search the same position with no limits until the main search finishes; they help
+        // through the shared table. Only the main search reports and chooses the move.
+        std::vector<std::thread> pool;
+        for (auto& h : helpers) {
+          Searcher* hp = h.get();
+          hp->stop = false;
+          pool.emplace_back([hp, root, hist]() { hp->search(root, hist, SearchLimits{}); });
+        }
         SearchResult r = searcher.search(root, hist, limits, print_info);
+        for (auto& h : helpers) h->stop = true;
+        for (auto& th : pool) th.join();
         send("bestmove " + move_to_uci(r.best));
       });
     } else if (cmd == "stop") {
