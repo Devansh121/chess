@@ -31,3 +31,32 @@ def test_random_game_ends_legally():
   for move in board.move_stack:
     assert move in replay.legal_moves
     replay.push(move)
+
+
+def test_openings_file_is_legal_and_distinct():
+  openings = match.load_openings(match.OPENINGS)
+  assert len(openings) >= 40
+  positions = set()
+  for moves in openings:
+    board = chess.Board()
+    for move in moves:
+      assert move in board.legal_moves
+      board.push(move)
+    positions.add(board.board_fen())
+  assert len(positions) == len(openings)
+
+
+def test_missing_openings_file_means_start_position():
+  assert match.load_openings("/nonexistent") == [[]]
+  assert match.load_openings("") == [[]]
+
+
+def test_game_starts_from_opening():
+  opening = match.load_openings(match.OPENINGS)[0]
+  _, board = match.play_game(match.Random(), match.Random(), opening)
+  assert board.move_stack[: len(opening)] == opening
+
+
+def test_elo_margin_shrinks_with_more_games():
+  assert match.elo_margin(30, 20, 30) > match.elo_margin(300, 200, 300)
+  assert 50 < match.elo_margin(30, 20, 30) < 100
