@@ -63,6 +63,13 @@ def test_takes_free_queen():
   assert move.uci() == "d1d5"
 
 
+def test_quiescence_sees_the_recapture():
+  # Qxd5 grabs a pawn but cxd5 wins the queen; a depth-1 search without quiescence would play it.
+  move, score = best("4k3/8/2p5/3p4/8/8/8/3QK3 w - - 0 1", 1)
+  assert move.uci() != "d1d5"
+  assert score > 600
+
+
 def test_does_not_leave_queen_hanging_to_a_pawn():
   board = chess.Board("4k3/8/8/4p3/3Q4/8/8/4K3 w - - 0 1")
   move, _, _ = Searcher().search(board, max_depth=3)

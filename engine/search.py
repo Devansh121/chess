@@ -6,7 +6,9 @@ MATE - plies_to_mate, so shorter mates score higher.
 
 import time
 
-from engine.eval import evaluate
+import chess
+
+from engine.eval import PIECE_VALUE, evaluate
 
 MATE = 100_000
 MATE_BOUND = MATE - 1000  # anything above this is a forced mate
@@ -104,8 +106,42 @@ class Searcher:
     return alpha
 
   def _leaf(self, board, alpha, beta, ply):
-    if board.is_checkmate():
-      return -(MATE - ply)
-    if board.is_stalemate():
-      return 0
-    return evaluate(board)
+    return self._quiesce(board, alpha, beta, ply)
+
+  def _quiesce(self, board, alpha, beta, ply):
+    """Search captures until the position is quiet, so the static eval never lands mid-exchange."""
+    self.nodes += 1
+    self._check_time()
+
+    in_check = board.is_check()
+    if in_check:
+      # No standing pat in check: every evasion must be searched, or mates go unseen.
+      moves = list(board.legal_moves)
+      if not moves:
+        return -(MATE - ply)
+    else:
+      stand_pat = evaluate(board)
+      if stand_pat >= beta:
+        return beta
+      if stand_pat > alpha:
+        alpha = stand_pat
+      moves = sorted(board.generate_legal_captures(), key=lambda m: _mvv_lva(board, m), reverse=True)
+
+    for move in moves:
+      board.push(move)
+      try:
+        score = -self._quiesce(board, -beta, -alpha, ply + 1)
+      finally:
+        board.pop()
+      if score >= beta:
+        return beta
+      if score > alpha:
+        alpha = score
+    return alpha
+
+
+def _mvv_lva(board, move):
+  """Most valuable victim first, then least valuable attacker."""
+  victim = board.piece_type_at(move.to_square) or chess.PAWN  # en passant leaves the target square empty
+  attacker = board.piece_type_at(move.from_square)
+  return PIECE_VALUE[victim] * 10 - PIECE_VALUE[attacker] // 10
