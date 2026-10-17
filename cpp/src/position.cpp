@@ -159,6 +159,16 @@ bool Position::attacked(int sq, int by) const {
          (bb::rook_attacks(sq, occupied) & (p[ROOK] | p[QUEEN]));
 }
 
+U64 Position::attackers_to(int sq, U64 occupied) const {
+  return (bb::pawn_attacks[BLACK][sq] & pieces[WHITE][PAWN]) | (bb::pawn_attacks[WHITE][sq] & pieces[BLACK][PAWN]) |
+         (bb::knight_attacks[sq] & (pieces[WHITE][KNIGHT] | pieces[BLACK][KNIGHT])) |
+         (bb::king_attacks[sq] & (pieces[WHITE][KING] | pieces[BLACK][KING])) |
+         (bb::bishop_attacks(sq, occupied) &
+          (pieces[WHITE][BISHOP] | pieces[BLACK][BISHOP] | pieces[WHITE][QUEEN] | pieces[BLACK][QUEEN])) |
+         (bb::rook_attacks(sq, occupied) &
+          (pieces[WHITE][ROOK] | pieces[BLACK][ROOK] | pieces[WHITE][QUEEN] | pieces[BLACK][QUEEN]));
+}
+
 Position Position::make(Move m) const {
   Position n = *this;
   int from = move_from(m), to = move_to(m), flag = move_flag(m);
