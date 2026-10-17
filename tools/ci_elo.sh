@@ -1,14 +1,21 @@
 #!/bin/bash
 # Elo test of the C++ engine: this checkout vs a base git ref, node-limited so the result doesn't depend
-# on machine speed or load. Writes a markdown report to $GITHUB_STEP_SUMMARY when set.
+# on machine speed or load. Prints a markdown report, also writes it to $ELO_REPORT (if set) and appends
+# it to $GITHUB_STEP_SUMMARY (if set).
 # usage: tools/ci_elo.sh BASE_REF [GAMES] [SHARDS] [NODES]
 set -euo pipefail
 cd "$(dirname "$0")/.."
 base_ref=$1 games=${2:-1000} shards=${3:-4} nodes=${4:-20000}
-report=${GITHUB_STEP_SUMMARY:-/dev/stdout}
+report=$(mktemp)
+publish() {
+  cat "$report"
+  if [ -n "${ELO_REPORT:-}" ]; then cp "$report" "$ELO_REPORT"; fi
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then cat "$report" >> "$GITHUB_STEP_SUMMARY"; fi
+}
 
 if ! git cat-file -e "$base_ref:cpp/src/main.cpp" 2>/dev/null; then
-  echo "Base $base_ref has no C++ engine yet; nothing to compare." | tee -a "$report"
+  echo "Base \`$base_ref\` has no C++ engine yet; nothing to compare." > "$report"
+  publish
   exit 0
 fi
 
@@ -45,5 +52,6 @@ set -e
   echo '```'
   echo
   echo "Fails only on a confident regression (the whole ~95% interval below -10 Elo)."
-} >> "$report"
+} > "$report"
+publish
 exit $status
