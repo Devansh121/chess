@@ -5,7 +5,10 @@ Streams one 1M-position shard at a time (shard order and positions reshuffled ev
 stays at a few hundred MB regardless of dataset size. Loss is MSE between the predicted and target win
 probability. Writes nets/<name>.pt (state dict) and nets/<name>.json (settings + per-epoch losses).
 
-usage: scripts/train.py NAME [--data data/processed] [--positions N] [--epochs N] [--decided keep|weight|drop]
+usage: scripts/train.py NAME [--data data/processed] [--shards K] [--epochs N] [--decided keep|weight|drop]
+
+For a data-size curve use --shards: it trains on a fixed subset (the first K shards, ~K million positions).
+--positions instead caps each epoch, drawing a different sample from all shards every epoch.
 """
 
 import argparse
@@ -84,6 +87,7 @@ def main():
   ap.add_argument("name")
   ap.add_argument("--data", default="data/processed")
   ap.add_argument("--out", default="nets")
+  ap.add_argument("--shards", type=int, default=0, help="train on the first K shards only (0 = all)")
   ap.add_argument("--positions", type=int, default=0, help="training positions per epoch (0 = all)")
   ap.add_argument("--epochs", type=int, default=10)
   ap.add_argument("--batch-size", type=int, default=16384)
@@ -97,6 +101,8 @@ def main():
   torch.manual_seed(args.seed)
   device = "cuda" if torch.cuda.is_available() else "cpu"
   train_shards = sorted(glob.glob(os.path.join(args.data, "train_*.npz")))
+  if args.shards:
+    train_shards = train_shards[: args.shards]
   val_shards = sorted(glob.glob(os.path.join(args.data, "val_*.npz")))
   if not train_shards or not val_shards:
     sys.exit(f"no shards in {args.data}; run scripts/build_dataset.py first")
