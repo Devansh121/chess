@@ -352,11 +352,18 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
   if (in_check && ply < MAX_PLY - 1) depth++;
   if (depth <= 0) return quiesce(pos, alpha, beta, ply);
 
+  // In a singular-extension verification search this position is searched without one move, so the table
+  // entry (which describes the full position) must neither cut this search off nor be overwritten by it.
+  Move excluded = ply < MAX_PLY + 64 ? excluded_[ply] : NO_MOVE;
   Move hash_move = NO_MOVE;
+  int tt_score = 0, tt_depth = -1, tt_bound = BOUND_NONE;
   if (TTEntry e; tt_->probe(pos.hash, e)) {
     hash_move = e.move;
-    if (e.depth >= depth) {
-      int s = from_tt(e.score, ply);
+    tt_score = from_tt(e.score, ply);
+    tt_depth = e.depth;
+    tt_bound = e.bound;
+    if (!excluded && e.depth >= depth) {
+      int s = tt_score;
       if (e.bound == BOUND_EXACT || (e.bound == BOUND_LOWER && s >= beta) || (e.bound == BOUND_UPPER && s <= alpha))
         return s;
     }
@@ -368,7 +375,7 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
   bool pv_node = beta - alpha > 1;
   // Internal iterative reduction: with no stored best move, ordering here will be poor, so search one
   // ply shallower; the result fills in a hash move for when this position comes back deeper.
-  if (hash_move == NO_MOVE && depth >= 4) depth--;
+  if (hash_move == NO_MOVE && depth >= 4 && !excluded) depth--;
   int static_eval = in_check ? -INF : evaluate(pos, ply);
   // "Improving": better than this side's eval two plies ago, so reverse futility pruning is more cautious.
   if (ply < ACC_STACK) eval_stack_[ply] = static_eval;
@@ -376,10 +383,11 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
 
   // Reverse futility pruning: close to the leaves, if the static eval beats beta by a margin that
   // grows with the remaining depth, the opponent is unlikely to recover in so few moves.
-  if (!pv_node && !in_check && depth <= 6 && std::abs(beta) < MATE_BOUND && static_eval - 80 * (depth - improving) >= beta)
+  if (!excluded && !pv_node && !in_check && depth <= 6 && std::abs(beta) < MATE_BOUND &&
+      static_eval - 80 * (depth - improving) >= beta)
     return static_eval;
 
-  if (allow_null && !pv_node && depth >= 3 && !in_check && pos.has_non_pawn_material(pos.side) &&
+  if (allow_null && !excluded && !pv_node && depth >= 3 && !in_check && pos.has_non_pawn_material(pos.side) &&
       static_eval >= beta) {
     int r = 2 + depth / 6;
     Position next = pos.make_null();
@@ -389,6 +397,19 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
     stack_.pop_back();
     if (aborted_) return 0;
     if (score >= beta) return beta;
+  }
+
+  // Singular extension: if the stored best move beats every alternative by a margin (checked by a reduced
+  // search of this position without it), it is the only good move here and gets one more ply.
+  int singular_ext = 0;
+  if (!excluded && ply > 0 && depth >= 8 && hash_move != NO_MOVE && tt_depth >= depth - 3 &&
+      (tt_bound == BOUND_LOWER || tt_bound == BOUND_EXACT) && std::abs(tt_score) < MATE_BOUND && ply < MAX_PLY) {
+    int singular_beta = tt_score - 2 * depth;
+    excluded_[ply] = hash_move;
+    int s = negamax(pos, (depth - 1) / 2, singular_beta - 1, singular_beta, ply, false);
+    excluded_[ply] = NO_MOVE;
+    if (aborted_) return 0;
+    if (s < singular_beta) singular_ext = 1;
   }
 
   MoveList list;
@@ -403,6 +424,7 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
   Move quiets_tried[MAX_MOVES];
   int n_quiets = 0;
   for (Move m; (m = picker.next()) != NO_MOVE;) {
+    if (m == excluded) continue;
     Position next = pos.make(m);
     if (next.attacked(next.king_sq(pos.side), next.side)) continue;  // left our king in check
     legal++;
@@ -432,13 +454,14 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
       score = -negamax(next, reduced, -alpha - 1, -alpha, ply + 1);
       if (score > alpha && reduced < depth - 1 && !aborted_) score = pvs(next, depth - 1, alpha, beta, ply + 1, false);
     } else {
-      score = pvs(next, depth - 1, alpha, beta, ply + 1, searched == 0);
+      int ext = m == hash_move ? singular_ext : 0;
+      score = pvs(next, depth - 1 + ext, alpha, beta, ply + 1, searched == 0);
     }
     searched++;
     stack_.pop_back();
     if (aborted_) return 0;
     if (score >= beta) {
-      tt_->store(pos.hash, m, to_tt(beta, ply), depth, BOUND_LOWER);
+      if (!excluded) tt_->store(pos.hash, m, to_tt(beta, ply), depth, BOUND_LOWER);
       if (quiet) {
         if (ply < MAX_PLY && killers_[ply][0] != m) {
           killers_[ply][1] = killers_[ply][0];
@@ -457,9 +480,9 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
       best = m;
     }
   }
-  if (legal == 0) return in_check ? -(MATE - ply) : 0;
+  if (legal == 0) return excluded ? alpha : in_check ? -(MATE - ply) : 0;  // the excluded move is legal
   if (searched == 0) return alpha;  // every legal move was pruned: a fail low, not a mate or stalemate
-  tt_->store(pos.hash, best, to_tt(alpha, ply), depth, alpha > alpha_orig ? BOUND_EXACT : BOUND_UPPER);
+  if (!excluded) tt_->store(pos.hash, best, to_tt(alpha, ply), depth, alpha > alpha_orig ? BOUND_EXACT : BOUND_UPPER);
   return alpha;
 }
 
