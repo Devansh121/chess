@@ -1,6 +1,5 @@
-// Alpha-beta search (negamax) with iterative deepening, quiescence search, transposition table and
-// move ordering (hash move, MVV-LVA captures, killers). First version: a faithful port of the Python
-// engine's stage D so the speed gain can be measured on its own.
+// Alpha-beta search (negamax) with iterative deepening, principal variation search, quiescence search,
+// transposition table and move ordering (hash move, MVV-LVA captures, killers).
 #pragma once
 
 #include <atomic>
@@ -50,6 +49,7 @@ class Searcher {
 
  private:
   int negamax(const Position& pos, int depth, int alpha, int beta, int ply);
+  int pvs(const Position& next, int depth, int alpha, int beta, int ply, bool first);
   int quiesce(const Position& pos, int alpha, int beta, int ply);
   int root_search(const Position& pos, int depth, Move prev_best, Move& best);
   bool is_draw(const Position& pos, int ply) const;
