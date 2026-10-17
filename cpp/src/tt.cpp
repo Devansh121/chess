@@ -16,9 +16,15 @@ const TTEntry* TT::probe(U64 key) const {
 
 void TT::store(U64 key, Move move, int score, int depth, Bound bound) {
   TTEntry& e = table_[key & mask_];
-  if (e.key == key && depth < e.depth && bound != BOUND_EXACT) return;
+  if (e.bound != BOUND_NONE) {
+    if (e.key == key) {
+      if (depth < e.depth && bound != BOUND_EXACT) return;
+    } else if (e.generation == generation_ && e.depth > depth + 2) {
+      return;  // a much deeper result from this search: worth more than the new one
+    }
+  }
   if (move == NO_MOVE && e.key == key) move = e.move;  // keep the old best move if we have none
-  e = TTEntry{key, move, int16_t(score), int8_t(depth), uint8_t(bound), 0};
+  e = TTEntry{key, move, int16_t(score), int8_t(depth), uint8_t(bound), generation_, 0};
 }
 
 int TT::hashfull() const {

@@ -156,7 +156,16 @@ int Searcher::quiesce(const Position& pos, int alpha, int beta, int ply) {
     aborted_ = true;
     return 0;
   }
+  // Quiescence results are stored at depth 0, so any table entry for this position is deep enough.
+  Move hash_move = NO_MOVE;
+  if (const TTEntry* e = tt_.probe(pos.hash)) {
+    hash_move = e->move;
+    int s = from_tt(e->score, ply);
+    if (e->bound == BOUND_EXACT || (e->bound == BOUND_LOWER && s >= beta) || (e->bound == BOUND_UPPER && s <= alpha))
+      return s;
+  }
   bool in_check = pos.in_check();
+  int alpha_orig = alpha;
   MoveList list;
   if (in_check) {
     generate(pos, list);  // all evasions; no standing pat in check
@@ -166,8 +175,9 @@ int Searcher::quiesce(const Position& pos, int alpha, int beta, int ply) {
     if (stand_pat > alpha) alpha = stand_pat;
     generate(pos, list, true);
   }
-  order_moves(pos, list.moves, list.size, NO_MOVE, MAX_PLY);
+  order_moves(pos, list.moves, list.size, hash_move, MAX_PLY);
   bool any_legal = false;
+  Move best = NO_MOVE;
   for (Move m : list) {
     if (!in_check && !is_capture(m)) continue;  // quiet queen promotions are not searched here (as in stage D)
     if (!in_check && see(pos, m) < 0) continue;  // captures that lose material are never the best way out
@@ -178,10 +188,17 @@ int Searcher::quiesce(const Position& pos, int alpha, int beta, int ply) {
     int score = -quiesce(next, -beta, -alpha, ply + 1);
     stack_.pop_back();
     if (aborted_) return 0;
-    if (score >= beta) return beta;
-    if (score > alpha) alpha = score;
+    if (score >= beta) {
+      tt_.store(pos.hash, m, to_tt(beta, ply), 0, BOUND_LOWER);
+      return beta;
+    }
+    if (score > alpha) {
+      alpha = score;
+      best = m;
+    }
   }
   if (in_check && !any_legal) return -(MATE - ply);
+  tt_.store(pos.hash, best, to_tt(alpha, ply), 0, alpha > alpha_orig ? BOUND_EXACT : BOUND_UPPER);
   return alpha;
 }
 
@@ -351,6 +368,7 @@ SearchResult Searcher::search(const Position& root, const std::vector<U64>& hist
   stack_ = history;
   stack_.push_back(root.hash);
   enter(root, 0);
+  tt_.new_search();
 
   SearchResult result;
   MoveList legal;
