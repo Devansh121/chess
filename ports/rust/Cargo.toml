@@ -1,0 +1,22 @@
+[package]
+name = "chess-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Rust port of the chess engine (same design as cpp/), for speed and Elo comparison"
+license = "MIT"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "perft"
+path = "src/bin/perft.rs"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+
+[profile.test]
+opt-level = 3
