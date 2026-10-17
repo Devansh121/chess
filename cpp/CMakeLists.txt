@@ -9,10 +9,15 @@ endif()
 
 # Tune for the build machine by default; CI turns this off so binaries run anywhere.
 option(NATIVE "Compile with -march=native" ON)
+option(SANITIZE "Build with AddressSanitizer and UndefinedBehaviorSanitizer (-O1, debug info)" OFF)
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
 add_compile_options(-Wall -Wextra)
 if(NATIVE)
   add_compile_options(-march=native)
+endif()
+if(SANITIZE)
+  add_compile_options(-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all)
+  add_link_options(-fsanitize=address,undefined)
 endif()
 
 add_library(engine_core STATIC
