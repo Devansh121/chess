@@ -268,6 +268,14 @@ void Searcher::order_moves(const Position& pos, Move* moves, int n, Move hash_mo
 
 int Searcher::evaluate(const Position& pos, int ply) {
   if (!net_) return eval::evaluate(pos);
+  EvalCacheEntry& cached = eval_cache_[pos.hash & (EVAL_CACHE_SIZE - 1)];
+  if (cached.valid && cached.key == pos.hash) return cached.score;
+  int score = evaluate_network(pos, ply);
+  cached = EvalCacheEntry{pos.hash, score, 1};
+  return score;
+}
+
+int Searcher::evaluate_network(const Position& pos, int ply) {
   if (ply >= ACC_STACK) {
     nnue::Accumulator scratch;
     nnue::refresh(*net_, pos, scratch);
