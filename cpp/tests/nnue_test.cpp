@@ -69,8 +69,10 @@ int max_diff(const nnue::Network& net, const nnue::Accumulator& a, const nnue::A
 
 // Walk the legal move tree; at every node compare the incrementally updated accumulator with a refresh.
 // Also tracks the largest gap between the quantized and float-reference outputs.
+// With `cache`, bucket refreshes go through one RefreshCache shared by the whole tree, so its entries are
+// reused from unrelated positions in arbitrary order.
 int walk(const nnue::Network& net, const Position& pos, const nnue::Accumulator& acc, int depth, long& nodes,
-         float& worst_quant) {
+         float& worst_quant, nnue::RefreshCache* cache = nullptr) {
   nnue::Accumulator fresh;
   nnue::refresh(net, pos, fresh);
   int worst = max_diff(net, acc, fresh);
@@ -84,8 +86,8 @@ int walk(const nnue::Network& net, const Position& pos, const nnue::Accumulator&
   for (Move m : list) {
     Position next = pos.make(m);
     nnue::Accumulator child;
-    nnue::update(net, pos, next, acc, child);
-    worst = std::max(worst, walk(net, next, child, depth - 1, nodes, worst_quant));
+    nnue::update(net, pos, next, acc, child, cache);
+    worst = std::max(worst, walk(net, next, child, depth - 1, nodes, worst_quant, cache));
   }
   return worst;
 }
@@ -129,6 +131,12 @@ int main() {
       int worst = walk(net, pos, acc, 3, nodes, worst_quant);
       check(worst == 0, "arch " + std::to_string(arch) + " incremental == refresh exactly over " +
                             std::to_string(nodes) + " nodes: " + fen);
+      nnue::RefreshCache cache;
+      cache.reset(net);
+      long cached_nodes = 0;
+      float unused = 0;
+      check(walk(net, pos, acc, 3, cached_nodes, unused, &cache) == 0,
+            "arch " + std::to_string(arch) + " incremental with refresh cache == refresh exactly");
       // int8 hidden weights and 7-bit activations: about twice the int16 version's rounding error.
       check(worst_quant < 0.04f, "arch " + std::to_string(arch) + " quantized within 0.04 of float logit (max " +
                                      std::to_string(worst_quant) + ")");

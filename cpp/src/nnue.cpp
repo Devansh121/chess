@@ -195,8 +195,34 @@ void refresh(const Network& net, const Position& pos, Accumulator& acc) {
   for (int p = WHITE; p <= BLACK; p++) refresh_perspective(net, pos, p, acc.v[p]);
 }
 
+void RefreshCache::reset(const Network& net) {
+  buckets_ = net.num_buckets;
+  entries_.assign(size_t(2 * buckets_ * 2), Entry{});
+}
+
+void RefreshCache::refresh(const Network& net, const Position& pos, int p, const View& v, int16_t* out) {
+  int n = net.hidden1;
+  Entry& e = entries_[size_t((p * buckets_ + v.base / NUM_FEATURES) * 2 + ((v.flip & 7) ? 1 : 0))];
+  if (!e.valid) {
+    refresh_perspective(net, pos, p, e.acc);
+    std::memcpy(e.pieces, pos.pieces, sizeof(e.pieces));
+    e.valid = true;
+  } else {
+    for (int c = WHITE; c <= BLACK; c++)
+      for (int t = PAWN; t <= KING; t++) {
+        U64 diff = e.pieces[c][t] ^ pos.pieces[c][t];
+        for (U64 removed = diff & e.pieces[c][t]; removed;)
+          sub_row(e.acc, &net.w1q[size_t(feature(v, p, c, t, pop_lsb(removed))) * n], n);
+        for (U64 added = diff & pos.pieces[c][t]; added;)
+          add_row(e.acc, &net.w1q[size_t(feature(v, p, c, t, pop_lsb(added))) * n], n);
+        e.pieces[c][t] = pos.pieces[c][t];
+      }
+  }
+  std::memcpy(out, e.acc, sizeof(int16_t) * n);
+}
+
 void update(const Network& net, const Position& parent, const Position& child, const Accumulator& parent_acc,
-            Accumulator& child_acc) {
+            Accumulator& child_acc, RefreshCache* cache) {
   int n = net.hidden1;
   View views[2];
   bool incremental[2];
@@ -205,8 +231,10 @@ void update(const Network& net, const Position& parent, const Position& child, c
     incremental[p] = views[p] == view(net, parent, p);
     if (incremental[p])
       std::memcpy(child_acc.v[p], parent_acc.v[p], sizeof(int16_t) * n);
+    else if (cache)  // this side's king changed bucket or mirror half
+      cache->refresh(net, child, p, views[p], child_acc.v[p]);
     else
-      refresh_perspective(net, child, p, child_acc.v[p]);  // this side's king changed bucket or mirror half
+      refresh_perspective(net, child, p, child_acc.v[p]);
   }
   for (int c = WHITE; c <= BLACK; c++)
     for (int t = PAWN; t <= KING; t++) {

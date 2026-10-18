@@ -92,10 +92,29 @@ inline int feature(const View& v, int perspective, int color, int type, int sq) 
   return v.base + ((color == perspective ? 0 : 1) * 6 + type) * 64 + (sq ^ v.flip);
 }
 
+// Per-thread cache for king-bucket refreshes: one accumulator per (perspective, bucket, mirror half) with
+// the pieces it was built from, so a refresh only applies the pieces that changed since that bucket was
+// last used instead of re-adding every piece. Results are identical to a plain refresh.
+class RefreshCache {
+ public:
+  void reset(const Network& net);  // call whenever the network changes
+  void refresh(const Network& net, const Position& pos, int perspective, const View& v, int16_t* out);
+
+ private:
+  struct Entry {
+    alignas(64) int16_t acc[MAX_HIDDEN1];
+    U64 pieces[2][6];
+    bool valid = false;
+  };
+  std::vector<Entry> entries_;  // [perspective][bucket][mirrored]
+  int buckets_ = 0;
+};
+
 void refresh(const Network& net, const Position& pos, Accumulator& acc);
 // child accumulator = parent accumulator + (pieces added) - (pieces removed) going parent -> child.
+// A perspective whose king changed bucket is rebuilt, through `cache` when one is given.
 void update(const Network& net, const Position& parent, const Position& child, const Accumulator& parent_acc,
-            Accumulator& child_acc);
+            Accumulator& child_acc, RefreshCache* cache = nullptr);
 float logit(const Network& net, const Accumulator& acc, int side_to_move);
 // Centipawns for the side to move, capped at +/-5000 to stay clear of mate scores.
 int evaluate(const Network& net, const Accumulator& acc, int side_to_move);
