@@ -45,6 +45,19 @@ jobs:
       - run: cmake --build cpp/build-san -j 4
       - run: ctest --test-dir cpp/build-san --output-on-failure
 
+  rust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: ports/rust
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo fmt --check
+      - run: cargo clippy --release --all-targets -- -D warnings
+      - run: cargo test --release
+      - run: cargo run --release --bin perft
+
   elo:
     # Strength test of the C++ engine against the PR's base branch; fails only on a confident regression.
     if: github.event_name == 'pull_request'
