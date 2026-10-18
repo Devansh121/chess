@@ -105,6 +105,7 @@ def main():
   ap.add_argument("--cp-scale", type=float, default=CP_SCALE, help="target = 1 / (1 + 10^(-cp / scale))")
   ap.add_argument("--seed", type=int, default=0)
   ap.add_argument("--arch", choices=sorted(ARCHS), default="v1")
+  ap.add_argument("--hidden1", type=int, default=256, help="first-layer width (the C++ engine supports up to 512)")
   args = ap.parse_args()
   args.data = args.data or ["data/processed"]
 
@@ -123,7 +124,7 @@ def main():
   if not train_shards or not val_shards:
     sys.exit(f"no shards in {args.data}; run scripts/build_dataset.py first")
 
-  model = ARCHS[args.arch]()
+  model = ARCHS[args.arch](hidden1=args.hidden1)
   if args.init:
     model.load_state_dict(torch.load(args.init, map_location="cpu"))
   model = model.to(device)
