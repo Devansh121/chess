@@ -1,0 +1,61 @@
+{
+  "args": {
+    "name": "v2-150m-cont",
+    "data": [
+      "data/processed",
+      "data/processed2"
+    ],
+    "init": "nets/v2-150m-final.pt",
+    "out": "nets",
+    "shards": 0,
+    "positions": 0,
+    "epochs": 5,
+    "batch_size": 16384,
+    "lr": 0.0003,
+    "decided": "keep",
+    "cp_scale": 400.0,
+    "seed": 0,
+    "arch": "v2",
+    "hidden1": 256
+  },
+  "device": "cuda",
+  "params": 213569,
+  "epochs": [
+    {
+      "epoch": 1,
+      "train_mse": 0.026741406081354047,
+      "val_mse": 0.02681397352459737,
+      "positions": 148474364,
+      "secs": 160.0917329788208
+    },
+    {
+      "epoch": 2,
+      "train_mse": 0.026673459660439214,
+      "val_mse": 0.026706849299048558,
+      "positions": 148474364,
+      "secs": 165.81336760520935
+    },
+    {
+      "epoch": 3,
+      "train_mse": 0.026571339802839246,
+      "val_mse": 0.026571364618213262,
+      "positions": 148474364,
+      "secs": 165.17024445533752
+    },
+    {
+      "epoch": 4,
+      "train_mse": 0.026477327100822096,
+      "val_mse": 0.026397048919318686,
+      "positions": 148474364,
+      "secs": 165.4204261302948
+    },
+    {
+      "epoch": 5,
+      "train_mse": 0.026421454752396906,
+      "val_mse": 0.02623362571289711,
+      "positions": 148474364,
+      "secs": 164.9670901298523
+    }
+  ],
+  "best_val_mse": 0.02623362571289711
+}
