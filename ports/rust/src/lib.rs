@@ -2,9 +2,11 @@
 //! and Zobrist keys, so the two can be compared like for like on speed and, later, playing strength.
 
 pub mod bitboard;
+pub mod eval;
 pub mod magics;
 pub mod movegen;
 pub mod position;
+pub mod search;
 pub mod types;
 
 /// The perft test positions shared with cpp/tests/perft_test.cpp, with their published node counts.

@@ -25,3 +25,11 @@ each, millions of nodes per second:
   uninitialised instead of zeroing it, and unchecked indexing into the magic attack table.
 - The remaining gap is likely bounds checks on square-indexed table lookups; to be profiled once the
   port has a search and evaluation.
+
+## Search: Rust vs C++
+
+With search and evaluation ported (step 2), mirroring the C++ engine's first search (#13):
+
+- `bench 7`: **10,959,291 nodes in both engines**, so they search exactly the same tree; Rust ~10.1M
+  nodes/s vs C++ ~9.9M. The move-generation gap above disappears once evaluation and search dominate.
+- 80 games at 0.1 s/move, Rust vs C++: +28 =20 -32 (47.5%), -17 ± 67 Elo, equal within the margin.
