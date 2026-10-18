@@ -186,6 +186,25 @@ void Searcher::clear_history() {
   std::memset(killers_, 0, sizeof(killers_));
   std::memset(history_, 0, sizeof(history_));
   std::memset(countermoves_, 0, sizeof(countermoves_));
+  std::memset(correction_, 0, sizeof(correction_));
+}
+
+namespace {
+inline size_t pawn_index(const Position& pos, int size) {
+  U64 k = pos.pieces[WHITE][PAWN] * 0x9E3779B97F4A7C15ULL ^ pos.pieces[BLACK][PAWN] * 0xC2B2AE3D27D4EB4FULL;
+  return size_t((k ^ (k >> 29)) & U64(size - 1));
+}
+constexpr int CORR_GRAIN = 256, CORR_LIMIT = 256 * 128;  // entries in 1/256 cp, at most +/-128 cp
+}  // namespace
+
+int Searcher::correction(const Position& pos) const {
+  return correction_[pos.side][pawn_index(pos, CORR_SIZE)] / CORR_GRAIN;
+}
+
+void Searcher::update_correction(const Position& pos, int depth, int diff) {
+  int& c = correction_[pos.side][pawn_index(pos, CORR_SIZE)];
+  int w = std::min(depth + 1, 16);
+  c = std::clamp((c * (256 - w) + diff * CORR_GRAIN * w) / 256, -CORR_LIMIT, CORR_LIMIT);
 }
 
 void Searcher::new_game() {
@@ -380,7 +399,8 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
   // Internal iterative reduction: with no stored best move, ordering here will be poor, so search one
   // ply shallower; the result fills in a hash move for when this position comes back deeper.
   if (hash_move == NO_MOVE && depth >= 4) depth--;
-  int static_eval = in_check ? -INF : evaluate(pos, ply);
+  int raw_eval = in_check ? -INF : evaluate(pos, ply);
+  int static_eval = in_check ? -INF : std::clamp(raw_eval + correction(pos), -MATE_BOUND + 1, MATE_BOUND - 1);
   // "Improving": better than this side's eval two plies ago, so reverse futility pruning is more cautious.
   if (ply < ACC_STACK) eval_stack_[ply] = static_eval;
   bool improving = !in_check && ply >= 2 && eval_stack_[ply - 2] != -INF && static_eval > eval_stack_[ply - 2];
@@ -462,6 +482,8 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
     if (aborted_) return 0;
     if (score >= beta) {
       tt_->store(pos.hash, m, to_tt(beta, ply), depth, BOUND_LOWER);
+      if (quiet && !in_check && beta > static_eval && std::abs(beta) < MATE_BOUND)
+        update_correction(pos, depth, beta - raw_eval);  // a lower bound above the eval: the eval was low
       if (quiet) {
         if (ply < MAX_PLY && killers_[ply][0] != m) {
           killers_[ply][1] = killers_[ply][0];
@@ -482,6 +504,10 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
   }
   if (legal == 0) return in_check ? -(MATE - ply) : 0;
   if (searched == 0) return alpha;  // every legal move was pruned: a fail low, not a mate or stalemate
+  bool exact = alpha > alpha_orig;
+  if (!in_check && (best == NO_MOVE || (!is_capture(best) && !is_promotion(best))) && std::abs(alpha) < MATE_BOUND &&
+      (exact || alpha < static_eval))  // exact, or an upper bound below the eval: the eval was high
+    update_correction(pos, depth, alpha - raw_eval);
   tt_->store(pos.hash, best, to_tt(alpha, ply), depth, alpha > alpha_orig ? BOUND_EXACT : BOUND_UPPER);
   return alpha;
 }

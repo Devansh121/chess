@@ -105,6 +105,12 @@ class Searcher {
   Move killers_[MAX_PLY][2];
   int history_[2][64][64];  // quiet-move history: bonus for cutoffs, malus for quiets tried before one
   Move countermoves_[12][64] = {};      // [piece that just moved][its square] -> quiet reply that refuted it
+  // Correction history: how far the static eval has been from search results, by side and pawn structure,
+  // in 1/256 cp. Added to the static eval before pruning decisions.
+  static constexpr int CORR_SIZE = 16384;
+  int correction_[2][CORR_SIZE];
+  int correction(const Position& pos) const;
+  void update_correction(const Position& pos, int depth, int diff);
   Move move_stack_[MAX_PLY + 64] = {};  // move made at each ply on the current path (NO_MOVE for a null move)
   void update_history(int side, Move m, int bonus);
   std::vector<U64> stack_;  // hashes from the game start to the current node
