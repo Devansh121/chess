@@ -1,13 +1,17 @@
-// Self-play data generation: `chess-engine datagen GAMES NODES SEED OUT [RANDOM_PLIES]`.
+// Self-play data generation: `chess-engine datagen GAMES NODES SEED OUT [RANDOM_PLIES] [OPENINGS]`.
 //
-// Plays GAMES games of the engine against itself with the default evaluation, NODES nodes per move,
-// each starting from RANDOM_PLIES random legal moves (seeded) for variety. Writes one line per quiet
+// Plays GAMES games of the engine against itself with the default evaluation, about NODES nodes per
+// move (each move draws a budget within +/-30%, so games from the same start diverge), each starting
+// from a random line of OPENINGS (one UCI move sequence per line, e.g. tools/openings.txt; none = the
+// start position) followed by RANDOM_PLIES random legal moves, all seeded. Writes one line per quiet
 // position (side to move not in check, chosen move not a capture or promotion, score not a mate):
 //   FEN <TAB> search score (centipawns, White's view) <TAB> game result (1 / 0.5 / 0, White's view)
 // Games end on mate, stalemate, repetition, the 50-move rule, insufficient material, 400 plies (draw),
 // or when one side's score stays beyond 2500 cp for 8 plies (adjudicated win).
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -58,6 +62,21 @@ int run_datagen(int argc, char** argv) {
   Rng rng{std::strtoull(argv[4], nullptr, 10) * 0x9E3779B97F4A7C15ULL + 1};
   const char* out_path = argv[5];
   int random_plies = argc > 6 ? std::atoi(argv[6]) : 8;
+  std::vector<std::vector<std::string>> openings;
+  if (argc > 7) {
+    std::ifstream f(argv[7]);
+    for (std::string line; std::getline(f, line);) {
+      if (line.empty() || line[0] == '#') continue;
+      std::istringstream words(line);
+      std::vector<std::string> moves;
+      for (std::string w; words >> w;) moves.push_back(w);
+      if (!moves.empty()) openings.push_back(moves);
+    }
+    if (openings.empty()) {
+      std::fprintf(stderr, "no openings in %s\n", argv[7]);
+      return 1;
+    }
+  }
 
   nnue::Network net;
   Searcher searcher(16);
@@ -74,6 +93,18 @@ int run_datagen(int argc, char** argv) {
     pos.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
     std::vector<U64> history;
     bool ok = true;
+    if (!openings.empty()) {
+      for (const std::string& uci : openings[rng.next() % openings.size()]) {
+        MoveList legal;
+        generate_legal(pos, legal);
+        Move found = NO_MOVE;
+        for (Move m : legal)
+          if (move_to_uci(m) == uci) found = m;
+        if (found == NO_MOVE) break;  // a malformed line just ends early
+        history.push_back(pos.hash);
+        pos = pos.make(found);
+      }
+    }
     for (int i = 0; i < random_plies; i++) {
       MoveList legal;
       generate_legal(pos, legal);
@@ -96,7 +127,7 @@ int run_datagen(int argc, char** argv) {
     for (int ply = 0; ply < 400; ply++) {
       if (pos.halfmove >= 100 || insufficient(pos) || repeated(history, pos)) break;
       SearchLimits limits;
-      limits.nodes = nodes;
+      limits.nodes = U64(double(nodes) * (0.7 + 0.6 * double(rng.next() % 1000) / 1000.0));
       SearchResult r = searcher.search(pos, history, limits);
       if (r.best == NO_MOVE) {  // no legal move: mate or stalemate
         if (pos.in_check()) result = pos.side == WHITE ? 0.0 : 1.0;
