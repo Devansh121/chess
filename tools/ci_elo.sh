@@ -24,7 +24,7 @@ git worktree add -q --detach "$work/base" "$base_ref"
 trap 'git worktree remove --force "$work/base"; rm -rf "$work"' EXIT
 for side in head base; do
   src=$([ $side = head ] && echo cpp || echo "$work/base/cpp")
-  cmake -S "$src" -B "$work/build-$side" -DCMAKE_BUILD_TYPE=Release -DNATIVE=OFF > /dev/null
+  cmake -S "$src" -B "$work/build-$side" -DCMAKE_BUILD_TYPE=Release -DNATIVE=ON > /dev/null  # same runner builds and runs both: use its AVX2
   cmake --build "$work/build-$side" -j "$shards" --target chess-engine > /dev/null
   cp "$work/build-$side/chess-engine" "$work/engine-$side"
 done

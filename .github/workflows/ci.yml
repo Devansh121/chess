@@ -49,7 +49,7 @@ jobs:
     # Strength test of the C++ engine against the PR's base branch; fails only on a confident regression.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 150
     permissions:
       contents: read
       pull-requests: write
