@@ -66,6 +66,7 @@ speed and network-only changes left the search untouched.
 | #37 | embedded magics | startup 0.33 s -> 0.056 s |
 | #53 | network evaluation cache | +11% nodes/s, identical nodes |
 | #38 | int8 hidden layer, 8-output kernel | +73% nodes/s with a network (idle machine); eval error 2.6 -> 5.5 cp mean; +139 ± 30 Elo vs int16 at 0.1 s/move |
+| #63 | profile-guided build (GCC 11, profile from self-play) | +12.5% nodes/s, identical nodes; +26 ± 17 Elo vs plain build at 5s+0.05s (800 games). Clang 14: +4.3%, Clang+PGO +11.1% |
 
 ## Networks
 
