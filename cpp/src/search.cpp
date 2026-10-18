@@ -56,8 +56,8 @@ bool insufficient_material(const Position& pos) {
 class MovePicker {
  public:
   MovePicker(const Position& pos, const MoveList& list, Move hash_move, const Move* killers, const int (*history)[64],
-             Move counter = NO_MOVE, const int* cont = nullptr)
-      : pos_(pos), list_(list), hash_(hash_move), history_(history), counter_(counter), cont_(cont) {
+             Move counter = NO_MOVE)
+      : pos_(pos), list_(list), hash_(hash_move), history_(history), counter_(counter) {
     killers_[0] = killers ? killers[0] : NO_MOVE;
     killers_[1] = killers ? killers[1] : NO_MOVE;
   }
@@ -105,11 +105,7 @@ class MovePicker {
       case BAD_CAPTURES:
         if (bad_cur_ < n_bad_) return bad_[bad_cur_++];
         stage_ = QUIETS;
-        for (int i = 0; i < n_quiets_; i++) {
-          Move q = quiets_[i];
-          quiet_scores_[i] = history_[move_from(q)][move_to(q)];
-          if (cont_) quiet_scores_[i] += cont_[pos_.board[move_from(q)] * 64 + move_to(q)];
-        }
+        for (int i = 0; i < n_quiets_; i++) quiet_scores_[i] = history_[move_from(quiets_[i])][move_to(quiets_[i])];
         [[fallthrough]];
       case QUIETS:
         while (quiet_cur_ < n_quiets_) {
@@ -164,7 +160,6 @@ class MovePicker {
   Move killers_[2];
   const int (*history_)[64];
   Move counter_;
-  const int* cont_;
   Stage stage_ = HASH;
   Move caps_[MAX_MOVES], bad_[MAX_MOVES], promos_[MAX_MOVES], quiets_[MAX_MOVES];
   int cap_scores_[MAX_MOVES], quiet_scores_[MAX_MOVES];
@@ -191,7 +186,6 @@ void Searcher::clear_history() {
   std::memset(killers_, 0, sizeof(killers_));
   std::memset(history_, 0, sizeof(history_));
   std::memset(countermoves_, 0, sizeof(countermoves_));
-  std::fill(conthist_.begin(), conthist_.end(), 0);
 }
 
 void Searcher::new_game() {
@@ -201,12 +195,6 @@ void Searcher::new_game() {
 
 // History gravity: bonuses saturate at +/-HISTORY_MAX, so old information fades as new arrives.
 constexpr int HISTORY_MAX = 16384;
-void Searcher::update_cont(int* row, const Position& pos, Move m, int bonus) {
-  if (!row) return;
-  int& h = row[pos.board[move_from(m)] * 64 + move_to(m)];
-  h += bonus - h * std::abs(bonus) / HISTORY_MAX;
-}
-
 void Searcher::update_history(int side, Move m, int bonus) {
   int& h = history_[side][move_from(m)][move_to(m)];
   h += bonus - h * std::abs(bonus) / HISTORY_MAX;
@@ -372,18 +360,11 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
   if (in_check && ply < MAX_PLY - 1) depth++;
   if (depth <= 0) return quiesce(pos, alpha, beta, ply);
 
-  // In a singular-extension verification search this position is searched without one move, so the table
-  // entry (which describes the full position) must neither cut this search off nor be overwritten by it.
-  Move excluded = ply < MAX_PLY + 64 ? excluded_[ply] : NO_MOVE;
   Move hash_move = NO_MOVE;
-  int tt_score = 0, tt_depth = -1, tt_bound = BOUND_NONE;
   if (TTEntry e; tt_->probe(pos.hash, e)) {
     hash_move = e.move;
-    tt_score = from_tt(e.score, ply);
-    tt_depth = e.depth;
-    tt_bound = e.bound;
-    if (!excluded && e.depth >= depth) {
-      int s = tt_score;
+    if (e.depth >= depth) {
+      int s = from_tt(e.score, ply);
       if (e.bound == BOUND_EXACT || (e.bound == BOUND_LOWER && s >= beta) || (e.bound == BOUND_UPPER && s <= alpha))
         return s;
     }
@@ -395,7 +376,7 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
   bool pv_node = beta - alpha > 1;
   // Internal iterative reduction: with no stored best move, ordering here will be poor, so search one
   // ply shallower; the result fills in a hash move for when this position comes back deeper.
-  if (hash_move == NO_MOVE && depth >= 4 && !excluded) depth--;
+  if (hash_move == NO_MOVE && depth >= 4) depth--;
   int static_eval = in_check ? -INF : evaluate(pos, ply);
   // "Improving": better than this side's eval two plies ago, so reverse futility pruning is more cautious.
   if (ply < ACC_STACK) eval_stack_[ply] = static_eval;
@@ -403,11 +384,10 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
 
   // Reverse futility pruning: close to the leaves, if the static eval beats beta by a margin that
   // grows with the remaining depth, the opponent is unlikely to recover in so few moves.
-  if (!excluded && !pv_node && !in_check && depth <= 6 && std::abs(beta) < MATE_BOUND &&
-      static_eval - 80 * (depth - improving) >= beta)
+  if (!pv_node && !in_check && depth <= 6 && std::abs(beta) < MATE_BOUND && static_eval - 80 * (depth - improving) >= beta)
     return static_eval;
 
-  if (allow_null && !excluded && !pv_node && depth >= 3 && !in_check && pos.has_non_pawn_material(pos.side) &&
+  if (allow_null && !pv_node && depth >= 3 && !in_check && pos.has_non_pawn_material(pos.side) &&
       static_eval >= beta) {
     int r = 2 + depth / 6;
     Position next = pos.make_null();
@@ -419,34 +399,18 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
     if (score >= beta) return beta;
   }
 
-  // Singular extension: if the stored best move beats every alternative by a margin (checked by a reduced
-  // search of this position without it), it is the only good move here and gets one more ply.
-  int singular_ext = 0;
-  if (!excluded && ply > 0 && depth >= 8 && hash_move != NO_MOVE && tt_depth >= depth - 3 &&
-      (tt_bound == BOUND_LOWER || tt_bound == BOUND_EXACT) && std::abs(tt_score) < MATE_BOUND && ply < MAX_PLY) {
-    int singular_beta = tt_score - 2 * depth;
-    excluded_[ply] = hash_move;
-    int s = negamax(pos, (depth - 1) / 2, singular_beta - 1, singular_beta, ply, false);
-    excluded_[ply] = NO_MOVE;
-    if (aborted_) return 0;
-    if (s < singular_beta) singular_ext = 1;
-  }
-
   MoveList list;
   generate(pos, list);
   // Counter move: the quiet reply that last refuted the opponent's previous move (piece + destination).
   Move prev = ply >= 1 ? move_stack_[ply - 1] : NO_MOVE;
   Move counter = prev != NO_MOVE ? countermoves_[pos.board[move_to(prev)]][move_to(prev)] : NO_MOVE;
-  int* cont = cont_row(prev, pos);
-  MovePicker picker(pos, list, hash_move, ply < MAX_PLY ? killers_[ply] : nullptr, history_[pos.side], counter,
-                    cont);
+  MovePicker picker(pos, list, hash_move, ply < MAX_PLY ? killers_[ply] : nullptr, history_[pos.side], counter);
   int alpha_orig = alpha;
   Move best = NO_MOVE;
   int searched = 0, legal = 0;
   Move quiets_tried[MAX_MOVES];
   int n_quiets = 0;
   for (Move m; (m = picker.next()) != NO_MOVE;) {
-    if (m == excluded) continue;
     Position next = pos.make(m);
     if (next.attacked(next.king_sq(pos.side), next.side)) continue;  // left our king in check
     legal++;
@@ -469,21 +433,17 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
     if (searched >= 3 && depth >= 3 && quiet && !killer && !in_check && !gives_check) {
       int r = lmr_table[std::min(depth, 63)][std::min(searched, 63)];
       if (pv_node) r = std::max(0, r - 1);
-      // Quiet moves with a strong cutoff history are reduced less, poor ones more (history is in
-      // [-16384, 16384], so this adjusts by up to 2 plies).
-      r = std::max(0, r - history_[pos.side][move_from(m)][move_to(m)] / 8192);
       int reduced = std::max(1, depth - 1 - r);
       score = -negamax(next, reduced, -alpha - 1, -alpha, ply + 1);
       if (score > alpha && reduced < depth - 1 && !aborted_) score = pvs(next, depth - 1, alpha, beta, ply + 1, false);
     } else {
-      int ext = m == hash_move ? singular_ext : 0;
-      score = pvs(next, depth - 1 + ext, alpha, beta, ply + 1, searched == 0);
+      score = pvs(next, depth - 1, alpha, beta, ply + 1, searched == 0);
     }
     searched++;
     stack_.pop_back();
     if (aborted_) return 0;
     if (score >= beta) {
-      if (!excluded) tt_->store(pos.hash, m, to_tt(beta, ply), depth, BOUND_LOWER);
+      tt_->store(pos.hash, m, to_tt(beta, ply), depth, BOUND_LOWER);
       if (quiet) {
         if (ply < MAX_PLY && killers_[ply][0] != m) {
           killers_[ply][1] = killers_[ply][0];
@@ -492,11 +452,7 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
         if (prev != NO_MOVE) countermoves_[pos.board[move_to(prev)]][move_to(prev)] = m;
         int bonus = std::min(depth * depth, 400);
         update_history(pos.side, m, bonus);
-        update_cont(cont, pos, m, bonus);
-        for (int i = 0; i < n_quiets; i++) {
-          update_history(pos.side, quiets_tried[i], -bonus);
-          update_cont(cont, pos, quiets_tried[i], -bonus);
-        }
+        for (int i = 0; i < n_quiets; i++) update_history(pos.side, quiets_tried[i], -bonus);
       }
       return beta;
     }
@@ -506,9 +462,9 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
       best = m;
     }
   }
-  if (legal == 0) return excluded ? alpha : in_check ? -(MATE - ply) : 0;  // the excluded move is legal
+  if (legal == 0) return in_check ? -(MATE - ply) : 0;
   if (searched == 0) return alpha;  // every legal move was pruned: a fail low, not a mate or stalemate
-  if (!excluded) tt_->store(pos.hash, best, to_tt(alpha, ply), depth, alpha > alpha_orig ? BOUND_EXACT : BOUND_UPPER);
+  tt_->store(pos.hash, best, to_tt(alpha, ply), depth, alpha > alpha_orig ? BOUND_EXACT : BOUND_UPPER);
   return alpha;
 }
 
