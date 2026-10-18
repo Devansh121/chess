@@ -142,8 +142,15 @@ std::string Network::load_from_memory(const void* data, size_t size) {
   for (float x : b1) max_b1 = std::max(max_b1, std::fabs(x));
   for (float x : w2) max_w2 = std::max(max_w2, std::fabs(x));
   if ((max_b1 + 32 * max_w1) * QA > 32000) return "first-layer weights too large for int16 accumulators";
-  qb = max_w2 > 0 ? int(127.0f / max_w2) : 127;
-  qb = std::min(qb, 127);
+  // Hidden-layer int8 scale from the 99.99th-percentile weight rather than the single largest one: a
+  // handful of outlier weights would otherwise force a coarse scale on all of them. The few weights
+  // beyond the percentile are clamped to +/-127 below.
+  std::vector<float> mags(w2.size());
+  for (size_t i = 0; i < w2.size(); i++) mags[i] = std::fabs(w2[i]);
+  size_t k = std::min(mags.size() - 1, size_t(double(mags.size()) * 0.9999));
+  std::nth_element(mags.begin(), mags.begin() + long(k), mags.end());
+  float scale_ref = std::max(mags[k], 1e-6f);
+  qb = std::min(127, int(127.0f / scale_ref));
   if (qb < QB_MIN) return "second-layer weights too large for int8";
 
   w1q.resize(w1.size());

@@ -64,16 +64,33 @@ class Stockfish:
     self.engine.quit()
 
 
+def check_evalfile(binary, evalfile):
+  """Fail loudly if the engine can't load `evalfile`: it would otherwise quietly fall back to its
+  hand-written evaluation and the match would measure something else."""
+  import subprocess
+
+  out = subprocess.run(
+    [os.path.abspath(binary)],
+    input=f"setoption name EvalFile value {evalfile}\nquit\n",
+    capture_output=True,
+    text=True,
+    timeout=30,
+  ).stdout
+  if "loaded network" not in out:
+    sys.exit(f"{binary} could not load EvalFile {evalfile}: {out.strip() or 'no output'}")
+
+
 class UciEngine:
   """Any UCI engine binary, thinking a fixed time (or a fixed number of nodes) per move."""
 
   def __init__(self, spec, movetime, nodes=0):
     path, _, opts = spec.partition("@")
     self.limit = chess.engine.Limit(nodes=nodes) if nodes else chess.engine.Limit(time=movetime)
-    self.engine = chess.engine.SimpleEngine.popen_uci(os.path.abspath(path))
     options = dict(kv.split("=", 1) for kv in opts.split(",") if kv)
     if "EvalFile" in options:
       options["EvalFile"] = os.path.abspath(options["EvalFile"])
+      check_evalfile(path, options["EvalFile"])  # before starting the engine, so a failure can exit cleanly
+    self.engine = chess.engine.SimpleEngine.popen_uci(os.path.abspath(path))
     if options:
       self.engine.configure(options)
 
