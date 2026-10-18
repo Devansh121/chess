@@ -19,6 +19,7 @@ longer time controls, so treat absolute numbers as approximate and comparisons a
 | C++ with search improvements + v2 network | vs Stockfish 2500 / 2800 / 3000, 160 each | +94 =21 -45 (+110 ± 53) / +17 =54 -89 (-168 ± 46) / +4 =38 -118 (-310 ± 56) | ~2610 / ~2630 / ~2690, **~2640** |
 | + int8 network kernel (#38) | vs int16 kernel, same net, 400 games at 0.1 s/move | +216 =120 -64 (+139 ± 30) | |
 | + int8 network kernel (#38) | vs Stockfish 2800 / 3000, 160 each | +23 =57 -80 (-129 ± 45) / +5 =46 -109 (-269 ± 51) | ~2670 / ~2730, **~2700** |
+| + counter moves (#44), eval cache (#53), neutral experiments reverted (#55) | vs Stockfish 2800 / 3000, 160 each | +42 =53 -65 (-50 ± 45) / +3 =45 -112 (-289 ± 52) | ~2750 / ~2710, **~2730** |
 
 ## Search changes (C++)
 
@@ -42,6 +43,11 @@ evaluation, 40 openings + 4 seeded random plies, both colours. Margins are ~95%.
 | #30 | internal iterative reductions | +25 ± 19 |
 | #31 | "improving" heuristic | -11 ± 20 (needs a gentler variant) |
 | #35 | staged lazy move picker | +5 ± 19 |
+| #42 | "improving": drop the extra LMR ply | -8 ± 19 |
+| #44 | counter-move heuristic | **+28 ± 19** |
+| #46 | history-weighted LMR | -2 ± 19 (reverted in #55) |
+| #47 | singular extensions | +1 ± 19 (reverted in #55) |
+| #48 | continuation history | -1 ± 19 (reverted in #55) |
 
 PRs that shouldn't change the hand-written search played exactly the same 1,000 games as their base
 (#26/#27/#28: +406 =182 -412; #32/#33/#34: +395 =202 -403; #36/#37: +388 =231 -381), which confirms the
@@ -57,6 +63,7 @@ speed and network-only changes left the search untouched.
 | #35 | lazy move picker | -7% time to depth |
 | #36 | make each move once | +11% nodes/s, identical nodes |
 | #37 | embedded magics | startup 0.33 s -> 0.056 s |
+| #53 | network evaluation cache | +11% nodes/s, identical nodes |
 | #38 | int8 hidden layer, 8-output kernel | +73% nodes/s with a network (idle machine); eval error 2.6 -> 5.5 cp mean; +139 ± 30 Elo vs int16 at 0.1 s/move |
 
 ## Networks
