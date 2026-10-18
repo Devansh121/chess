@@ -103,12 +103,6 @@ class Searcher {
   Move killers_[MAX_PLY][2];
   int history_[2][64][64];  // quiet-move history: bonus for cutoffs, malus for quiets tried before one
   Move countermoves_[12][64] = {};      // [piece that just moved][its square] -> quiet reply that refuted it
-  // Continuation history: [previous move's piece][its square][this move's piece][its square], flattened.
-  std::vector<int> conthist_ = std::vector<int>(12 * 64 * 12 * 64);
-  int* cont_row(Move prev, const Position& pos) {
-    return prev == NO_MOVE ? nullptr : &conthist_[(size_t(pos.board[move_to(prev)]) * 64 + move_to(prev)) * 12 * 64];
-  }
-  static void update_cont(int* row, const Position& pos, Move m, int bonus);
   Move move_stack_[MAX_PLY + 64] = {};  // move made at each ply on the current path (NO_MOVE for a null move)
   Move excluded_[MAX_PLY + 64] = {};    // move left out of a singular-extension verification search at that ply
   void update_history(int side, Move m, int bonus);
