@@ -20,6 +20,30 @@ if(SANITIZE)
   add_link_options(-fsanitize=address,undefined)
 endif()
 
+# Profile-guided optimisation, driven by tools/build_pgo.sh: GEN builds an instrumented binary that
+# writes profiles to PGO_DIR, USE rebuilds with them. Only code layout and inlining change, not the search.
+set(PGO "" CACHE STRING "Profile-guided optimisation stage: empty, GEN or USE")
+set(PGO_DIR "${CMAKE_BINARY_DIR}/pgo" CACHE PATH "Directory for PGO profiles")
+if(PGO STREQUAL "GEN")
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    set(PGO_FLAGS "-fprofile-instr-generate=${PGO_DIR}/%p.profraw")
+  else()
+    set(PGO_FLAGS "-fprofile-generate=${PGO_DIR}")
+  endif()
+elseif(PGO STREQUAL "USE")
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    set(PGO_FLAGS "-fprofile-instr-use=${PGO_DIR}/merged.profdata")
+  else()
+    set(PGO_FLAGS -fprofile-use=${PGO_DIR} -fprofile-correction -Wno-missing-profile)
+  endif()
+elseif(NOT PGO STREQUAL "")
+  message(FATAL_ERROR "PGO must be empty, GEN or USE (got '${PGO}')")
+endif()
+if(PGO_FLAGS)
+  add_compile_options(${PGO_FLAGS})
+  add_link_options(${PGO_FLAGS})
+endif()
+
 add_library(engine_core STATIC
   src/bitboard.cpp
   src/position.cpp
