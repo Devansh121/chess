@@ -48,6 +48,7 @@ class Searcher {
   void set_network(const nnue::Network* net) {
     net_ = net;
     std::fill(eval_cache_.begin(), eval_cache_.end(), EvalCacheEntry{});  // scores belong to the old network
+    if (net) refresh_cache_.reset(*net);
   }
   void new_game();
   void clear_history();  // killers and history only (helper threads; the shared table is cleared once)
@@ -84,6 +85,7 @@ class Searcher {
 
   static constexpr int ACC_STACK = MAX_PLY + 64;  // quiescence can go past MAX_PLY
   const nnue::Network* net_ = nullptr;
+  nnue::RefreshCache refresh_cache_;
   std::vector<nnue::Accumulator> acc_ = std::vector<nnue::Accumulator>(ACC_STACK);
   const Position* pos_at_[ACC_STACK] = {};
   bool acc_valid_[ACC_STACK] = {};

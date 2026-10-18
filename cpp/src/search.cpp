@@ -278,7 +278,7 @@ int Searcher::evaluate_network(const Position& pos, int ply) {
     acc_valid_[k] = true;
   }
   for (int j = k + 1; j <= ply; j++) {
-    nnue::update(*net_, *pos_at_[j - 1], *pos_at_[j], acc_[j - 1], acc_[j]);
+    nnue::update(*net_, *pos_at_[j - 1], *pos_at_[j], acc_[j - 1], acc_[j], &refresh_cache_);
     acc_valid_[j] = true;
   }
   return nnue::evaluate(*net_, acc_[ply], pos.side);

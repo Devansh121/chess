@@ -5,7 +5,10 @@ Input: lines starting with a FEN (e.g. from `chess-engine datagen`, extra tab-se
 Output: fen <TAB> cp <TAB> mate <TAB> depth, scores from White's point of view, so build_dataset.py can
 convert it like the Lichess data. Positions are scored in parallel, one Stockfish process per worker.
 
-usage: scripts/label_stockfish.py IN.tsv OUT.tsv [--depth D] [--workers N]
+Unparseable FENs are skipped and counted. --resume keeps an existing OUT.tsv and labels only the positions
+it doesn't have yet (appending).
+
+usage: scripts/label_stockfish.py IN.tsv OUT.tsv [--depth D] [--workers N] [--resume]
 """
 
 import argparse
@@ -30,7 +33,10 @@ def _init(depth):
 
 
 def _label(fen):
-  board = chess.Board(fen)
+  try:
+    board = chess.Board(fen)
+  except ValueError:
+    return None  # e.g. a line cut short when its writer was killed
   info = _engine.analyse(board, chess.engine.Limit(depth=_depth))
   score = info["score"].white()
   depth = info.get("depth", _depth)
@@ -45,19 +51,33 @@ def main():
   ap.add_argument("output")
   ap.add_argument("--depth", type=int, default=10)
   ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 2))
+  ap.add_argument("--resume", action="store_true", help="append to OUT.tsv, skipping positions already in it")
   args = ap.parse_args()
 
   with open(args.input) as f:
     fens = list(dict.fromkeys(line.split("\t", 1)[0].strip() for line in f if line.strip()))
-  print(f"{len(fens):,} unique positions, depth {args.depth}, {args.workers} workers", file=sys.stderr, flush=True)
-  done = 0
-  with Pool(args.workers, initializer=_init, initargs=(args.depth,)) as pool, open(args.output, "w") as out:
+  have = set()
+  if args.resume and os.path.exists(args.output):
+    with open(args.output) as f:
+      have = {line.split("\t", 1)[0] for line in f if line.endswith("\n")}
+    fens = [fen for fen in fens if fen not in have]
+  print(
+    f"{len(fens):,} unique positions to label ({len(have):,} already done), depth {args.depth}, {args.workers} workers",
+    file=sys.stderr,
+    flush=True,
+  )
+  done = skipped = 0
+  mode = "a" if args.resume else "w"
+  with Pool(args.workers, initializer=_init, initargs=(args.depth,)) as pool, open(args.output, mode) as out:
     for line in pool.imap(_label, fens, chunksize=64):
+      if line is None:
+        skipped += 1
+        continue
       out.write(line)
       done += 1
       if done % 50_000 == 0:
         print(f"{done:,} labelled", file=sys.stderr, flush=True)
-  print(f"done: {done:,} positions -> {args.output}", file=sys.stderr, flush=True)
+  print(f"done: {done:,} positions -> {args.output} ({skipped:,} invalid skipped)", file=sys.stderr, flush=True)
 
 
 if __name__ == "__main__":

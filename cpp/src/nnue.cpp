@@ -118,8 +118,21 @@ std::string Network::load_from_memory(const void* data, size_t size) {
   if (!read_raw(in, magic, 4) || std::memcmp(magic, "CHNN", 4) != 0) return "not a .nnue file";
   if (!read_raw(in, header, 5) || !read_raw(in, &cp_scale, 1)) return "truncated header";
   uint32_t version = header[0], a = header[1], inputs = header[2], h1 = header[3], h2 = header[4];
-  if (version != 1) return "unsupported version " + std::to_string(version);
-  if ((a != 1 && a != 2) || inputs != NUM_FEATURES + 1 || h1 == 0 || h1 > MAX_HIDDEN1 || h2 == 0)
+  if (version != (a == 3 ? 2u : 1u)) return "unsupported version " + std::to_string(version);
+  num_buckets = 1;
+  mirror = false;
+  std::memset(bucket, 0, sizeof(bucket));
+  if (a == 3) {
+    uint32_t nb;
+    if (!read_raw(in, &nb, 1) || !read_raw(in, bucket, 64)) return "truncated header";
+    if (nb < 1 || nb > 64) return "unsupported bucket count";
+    for (uint8_t b : bucket)
+      if (b >= nb) return "bad bucket map";
+    num_buckets = int(nb);
+    mirror = true;
+  }
+  if (a < 1 || a > 3 || inputs != uint32_t(num_buckets * NUM_FEATURES + 1) || h1 == 0 || h1 > MAX_HIDDEN1 ||
+      h2 == 0)
     return "unsupported dimensions";
   arch = int(a);
   hidden1 = int(h1);
@@ -127,7 +140,7 @@ std::string Network::load_from_memory(const void* data, size_t size) {
   cp_per_logit = cp_scale / std::log(10.0f);
   w1.resize(size_t(inputs) * h1);
   b1.resize(h1);
-  w2.resize(size_t(h2) * arch * h1);
+  w2.resize(size_t(h2) * perspectives() * h1);
   b2.resize(h2);
   w3.resize(h2);
   if (!read_raw(in, w1.data(), w1.size()) || !read_raw(in, b1.data(), b1.size()) ||
@@ -136,7 +149,7 @@ std::string Network::load_from_memory(const void* data, size_t size) {
     return "truncated weights";
 
   // Overflow guards: an accumulator is b1 plus at most 32 piece rows; a hidden-layer sum is at most
-  // arch * hidden1 products of QA * |w2q|.
+  // perspectives * hidden1 products of QA * |w2q|.
   float max_w1 = 0, max_b1 = 0, max_w2 = 0;
   for (float x : w1) max_w1 = std::max(max_w1, std::fabs(x));
   for (float x : b1) max_b1 = std::max(max_b1, std::fabs(x));
@@ -162,35 +175,80 @@ std::string Network::load_from_memory(const void* data, size_t size) {
   return "";
 }
 
-void refresh(const Network& net, const Position& pos, Accumulator& acc) {
+namespace {
+
+void refresh_perspective(const Network& net, const Position& pos, int p, int16_t* v) {
   int n = net.hidden1;
-  for (int p = WHITE; p <= BLACK; p++) {
-    int16_t* v = acc.v[p];
-    std::memcpy(v, net.b1q.data(), sizeof(int16_t) * n);
+  View view_p = view(net, pos, p);
+  std::memcpy(v, net.b1q.data(), sizeof(int16_t) * n);
+  for (int c = WHITE; c <= BLACK; c++)
+    for (int t = PAWN; t <= KING; t++)
+      for (U64 b = pos.pieces[c][t]; b;) {
+        int sq = pop_lsb(b);
+        add_row(v, &net.w1q[size_t(feature(view_p, p, c, t, sq)) * n], n);
+      }
+}
+
+}  // namespace
+
+void refresh(const Network& net, const Position& pos, Accumulator& acc) {
+  for (int p = WHITE; p <= BLACK; p++) refresh_perspective(net, pos, p, acc.v[p]);
+}
+
+void RefreshCache::reset(const Network& net) {
+  buckets_ = net.num_buckets;
+  entries_.assign(size_t(2 * buckets_ * 2), Entry{});
+}
+
+void RefreshCache::refresh(const Network& net, const Position& pos, int p, const View& v, int16_t* out) {
+  int n = net.hidden1;
+  Entry& e = entries_[size_t((p * buckets_ + v.base / NUM_FEATURES) * 2 + ((v.flip & 7) ? 1 : 0))];
+  if (!e.valid) {
+    refresh_perspective(net, pos, p, e.acc);
+    std::memcpy(e.pieces, pos.pieces, sizeof(e.pieces));
+    e.valid = true;
+  } else {
     for (int c = WHITE; c <= BLACK; c++)
-      for (int t = PAWN; t <= KING; t++)
-        for (U64 b = pos.pieces[c][t]; b;) {
-          int sq = pop_lsb(b);
-          add_row(v, &net.w1q[size_t(feature(p, c, t, sq)) * n], n);
-        }
+      for (int t = PAWN; t <= KING; t++) {
+        U64 diff = e.pieces[c][t] ^ pos.pieces[c][t];
+        for (U64 removed = diff & e.pieces[c][t]; removed;)
+          sub_row(e.acc, &net.w1q[size_t(feature(v, p, c, t, pop_lsb(removed))) * n], n);
+        for (U64 added = diff & pos.pieces[c][t]; added;)
+          add_row(e.acc, &net.w1q[size_t(feature(v, p, c, t, pop_lsb(added))) * n], n);
+        e.pieces[c][t] = pos.pieces[c][t];
+      }
   }
+  std::memcpy(out, e.acc, sizeof(int16_t) * n);
 }
 
 void update(const Network& net, const Position& parent, const Position& child, const Accumulator& parent_acc,
-            Accumulator& child_acc) {
+            Accumulator& child_acc, RefreshCache* cache) {
   int n = net.hidden1;
-  for (int p = WHITE; p <= BLACK; p++) std::memcpy(child_acc.v[p], parent_acc.v[p], sizeof(int16_t) * n);
+  View views[2];
+  bool incremental[2];
+  for (int p = WHITE; p <= BLACK; p++) {
+    views[p] = view(net, child, p);
+    incremental[p] = views[p] == view(net, parent, p);
+    if (incremental[p])
+      std::memcpy(child_acc.v[p], parent_acc.v[p], sizeof(int16_t) * n);
+    else if (cache)  // this side's king changed bucket or mirror half
+      cache->refresh(net, child, p, views[p], child_acc.v[p]);
+    else
+      refresh_perspective(net, child, p, child_acc.v[p]);
+  }
   for (int c = WHITE; c <= BLACK; c++)
     for (int t = PAWN; t <= KING; t++) {
       U64 diff = parent.pieces[c][t] ^ child.pieces[c][t];
       if (!diff) continue;
       for (U64 removed = diff & parent.pieces[c][t]; removed;) {
         int sq = pop_lsb(removed);
-        for (int p = WHITE; p <= BLACK; p++) sub_row(child_acc.v[p], &net.w1q[size_t(feature(p, c, t, sq)) * n], n);
+        for (int p = WHITE; p <= BLACK; p++)
+          if (incremental[p]) sub_row(child_acc.v[p], &net.w1q[size_t(feature(views[p], p, c, t, sq)) * n], n);
       }
       for (U64 added = diff & child.pieces[c][t]; added;) {
         int sq = pop_lsb(added);
-        for (int p = WHITE; p <= BLACK; p++) add_row(child_acc.v[p], &net.w1q[size_t(feature(p, c, t, sq)) * n], n);
+        for (int p = WHITE; p <= BLACK; p++)
+          if (incremental[p]) add_row(child_acc.v[p], &net.w1q[size_t(feature(views[p], p, c, t, sq)) * n], n);
       }
     }
 }
@@ -199,8 +257,8 @@ float logit(const Network& net, const Accumulator& acc, int side_to_move) {
   int n = net.hidden1;
   alignas(64) uint8_t h1[2 * MAX_HIDDEN1];
   clip_to_u8(acc.v[side_to_move], h1, n);
-  if (net.arch == 2) clip_to_u8(acc.v[side_to_move ^ 1], h1 + n, n);
-  int width = net.arch * n;
+  if (net.perspectives() == 2) clip_to_u8(acc.v[side_to_move ^ 1], h1 + n, n);
+  int width = net.perspectives() * n;
   alignas(64) int32_t sums[256];
   int h2 = std::min(net.hidden2, 256);
   hidden_layer(h1, net.w2q.data(), width, h2, sums);
@@ -219,11 +277,12 @@ void refresh_float(const Network& net, const Position& pos, FloatAccumulator& ac
   int n = net.hidden1;
   for (int p = WHITE; p <= BLACK; p++) {
     float* v = acc.v[p];
+    View view_p = view(net, pos, p);
     std::copy(net.b1.begin(), net.b1.end(), v);
     for (int c = WHITE; c <= BLACK; c++)
       for (int t = PAWN; t <= KING; t++)
         for (U64 b = pos.pieces[c][t]; b;) {
-          const float* row = &net.w1[size_t(feature(p, c, t, pop_lsb(b))) * n];
+          const float* row = &net.w1[size_t(feature(view_p, p, c, t, pop_lsb(b))) * n];
           for (int i = 0; i < n; i++) v[i] += row[i];
         }
   }
@@ -233,9 +292,9 @@ float logit_float(const Network& net, const FloatAccumulator& acc, int side_to_m
   int n = net.hidden1;
   float h1[2 * MAX_HIDDEN1];
   for (int i = 0; i < n; i++) h1[i] = std::clamp(acc.v[side_to_move][i], 0.0f, 1.0f);
-  if (net.arch == 2)
+  if (net.perspectives() == 2)
     for (int i = 0; i < n; i++) h1[n + i] = std::clamp(acc.v[side_to_move ^ 1][i], 0.0f, 1.0f);
-  int width = net.arch * n;
+  int width = net.perspectives() * n;
   float out = net.b3;
   for (int j = 0; j < net.hidden2; j++) {
     const float* row = &net.w2[size_t(j) * width];
