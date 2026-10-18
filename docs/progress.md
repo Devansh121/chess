@@ -17,6 +17,8 @@ longer time controls, so treat absolute numbers as approximate and comparisons a
 | C++ port of stage D | vs Stockfish 1900 / 2200 / 2500, 80 each | +65 =6 -9 / +47 =13 -20 / +29 =16 -35 | ~2200 / ~2320 / ~2475 |
 | C++ with search improvements (#15-#37) + v2 network | vs hand-written eval, same engine, 400 games | +228 =17 -155 (+64 ± 34) | |
 | C++ with search improvements + v2 network | vs Stockfish 2500 / 2800 / 3000, 160 each | +94 =21 -45 (+110 ± 53) / +17 =54 -89 (-168 ± 46) / +4 =38 -118 (-310 ± 56) | ~2610 / ~2630 / ~2690, **~2640** |
+| + int8 network kernel (#38) | vs int16 kernel, same net, 400 games at 0.1 s/move | +216 =120 -64 (+139 ± 30) | |
+| + int8 network kernel (#38) | vs Stockfish 2800 / 3000, 160 each | +23 =57 -80 (-129 ± 45) / +5 =46 -109 (-269 ± 51) | ~2670 / ~2730, **~2700** |
 
 ## Search changes (C++)
 
@@ -55,7 +57,7 @@ speed and network-only changes left the search untouched.
 | #35 | lazy move picker | -7% time to depth |
 | #36 | make each move once | +11% nodes/s, identical nodes |
 | #37 | embedded magics | startup 0.33 s -> 0.056 s |
-| #38 | int8 hidden layer, 8-output kernel | +65% nodes/s with a network; eval error 2.6 -> 5.5 cp mean |
+| #38 | int8 hidden layer, 8-output kernel | +73% nodes/s with a network (idle machine); eval error 2.6 -> 5.5 cp mean; +139 ± 30 Elo vs int16 at 0.1 s/move |
 
 ## Networks
 

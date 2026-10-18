@@ -1,0 +1,47 @@
+{
+  "args": {
+    "name": "v2-sp1-ft",
+    "data": [
+      "data/processed",
+      "data/processed-sp1:10"
+    ],
+    "init": "nets/v2-150m-final.pt",
+    "out": "nets",
+    "shards": 0,
+    "positions": 0,
+    "epochs": 3,
+    "batch_size": 16384,
+    "lr": 0.0003,
+    "decided": "keep",
+    "cp_scale": 400.0,
+    "seed": 0,
+    "arch": "v2",
+    "hidden1": 256
+  },
+  "device": "cuda",
+  "params": 213569,
+  "epochs": [
+    {
+      "epoch": 1,
+      "train_mse": 0.02491435441970733,
+      "val_mse": 0.03619959052556448,
+      "positions": 55367028,
+      "secs": 60.541258335113525
+    },
+    {
+      "epoch": 2,
+      "train_mse": 0.024664962978602715,
+      "val_mse": 0.026596723481050834,
+      "positions": 55367028,
+      "secs": 58.54253053665161
+    },
+    {
+      "epoch": 3,
+      "train_mse": 0.02456740177596343,
+      "val_mse": 0.026367257216491788,
+      "positions": 55367028,
+      "secs": 59.220948457717896
+    }
+  ],
+  "best_val_mse": 0.026367257216491788
+}
