@@ -91,6 +91,7 @@ class Searcher {
   int history_[2][64][64];  // quiet-move history: bonus for cutoffs, malus for quiets tried before one
   Move countermoves_[12][64] = {};      // [piece that just moved][its square] -> quiet reply that refuted it
   Move move_stack_[MAX_PLY + 64] = {};  // move made at each ply on the current path (NO_MOVE for a null move)
+  Move excluded_[MAX_PLY + 64] = {};    // move left out of a singular-extension verification search at that ply
   void update_history(int side, Move m, int bonus);
   std::vector<U64> stack_;  // hashes from the game start to the current node
   size_t root_index_ = 0;
