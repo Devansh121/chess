@@ -20,6 +20,7 @@ longer time controls, so treat absolute numbers as approximate and comparisons a
 | + int8 network kernel (#38) | vs int16 kernel, same net, 400 games at 0.1 s/move | +216 =120 -64 (+139 ± 30) | |
 | + int8 network kernel (#38) | vs Stockfish 2800 / 3000, 160 each | +23 =57 -80 (-129 ± 45) / +5 =46 -109 (-269 ± 51) | ~2670 / ~2730, **~2700** |
 | + counter moves (#44), eval cache (#53), neutral experiments reverted (#55) | vs Stockfish 2800 / 3000, 160 each | +42 =53 -65 (-50 ± 45) / +3 =45 -112 (-289 ± 52) | ~2750 / ~2710, **~2730** |
+| + 384-wide network as default (#58; +50 ± 22 vs the 256-wide net over 800 games) | vs Stockfish 2800 / 3000, 160 each | +42 =53 -65 (-50 ± 45) / +9 =52 -99 (-221 ± 48) | ~2750 / ~2780, **~2765** |
 
 ## Search changes (C++)
 
@@ -74,4 +75,7 @@ See `docs/experiments.md` for every training run. Highlights:
 |---|---|---|---|
 | v1, Python engine era | 49.5M Lichess positions | 0.0299 | no gain over hand-written (Python) |
 | v1 | ~149M positions | 0.0301 after 4 epochs | (comparison run) |
-| **v2** (both perspectives, default since #39) | ~149M positions, 10 epochs | **0.0265** | +64 ± 34 vs hand-written (C++) |
+| v2 (both perspectives, default #39-#57) | ~149M positions, 10 epochs | 0.0265 | +64 ± 34 vs hand-written (C++) |
+| v2 + 5 epochs (#57) | same, continued at lr 3e-4 | 0.0262 | +16 ± 21 vs v2 (800 games) |
+| v2 + 10 epochs | same, continued again at lr 2e-4 | 0.0261 | -0 ± 20 vs #57's net (800 games): no gain |
+| **v2, 384-wide (default since #58)** | ~149M positions, 10 epochs | **0.0250** | **+50 ± 22** vs #57's net (800 games) |
