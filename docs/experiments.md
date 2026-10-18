@@ -58,3 +58,19 @@ stopped for low memory.
 Self-play round 1 did not help. Likely causes, to test next: depth-10 labels are much noisier than the
 Lichess labels (average depth ~31); 8 random opening plies give unusual positions; 10x repetition gave
 the noisy labels too much weight.
+
+## Round 3: network width and longer training (first layer 256 / 384 / 448)
+
+All on the same ~149M Lichess positions, validation on the original 500k set. Matches: same engine
+binary, 800 games at 0.1 s/move (400 from the 40 openings + 400 with 4 extra seeded random plies).
+
+| Name | Width | Training | Best val MSE | nodes/s (bench 12) | Match |
+|---|---|---|---|---|---|
+| v2-150m-cont (#57) | 256 | v2-150m + 5 epochs, lr 3e-4 | 0.02623 | ~3.0M | +16 ± 21 vs v2-150m |
+| v2-150m-cont2 | 256 | + 5 more epochs, lr 2e-4 | 0.02609 | ~3.0M | -0 ± 20 vs v2-150m-cont |
+| **v2h384-150m (#58)** | **384** | 10 epochs from scratch | **0.02504** | ~2.75M | **+50 ± 22** vs v2-150m-cont |
+| v2h448-150m | 448 | 10 epochs from scratch | 0.02456 | ~2.45M | -13 ± 21 vs v2h384 |
+
+Longer training of the 256-wide net stopped paying after 5 epochs. Width paid off at 384, but at 448 the
+slightly better loss (-1.9%) no longer made up for 11% less speed at this time control: 384 is the sweet
+spot here. Next lever: more data (the size curve was still improving at every doubling).
