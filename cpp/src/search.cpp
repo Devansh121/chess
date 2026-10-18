@@ -56,8 +56,8 @@ bool insufficient_material(const Position& pos) {
 class MovePicker {
  public:
   MovePicker(const Position& pos, const MoveList& list, Move hash_move, const Move* killers, const int (*history)[64],
-             Move counter = NO_MOVE)
-      : pos_(pos), list_(list), hash_(hash_move), history_(history), counter_(counter) {
+             Move counter = NO_MOVE, const int* cont = nullptr)
+      : pos_(pos), list_(list), hash_(hash_move), history_(history), counter_(counter), cont_(cont) {
     killers_[0] = killers ? killers[0] : NO_MOVE;
     killers_[1] = killers ? killers[1] : NO_MOVE;
   }
@@ -105,7 +105,11 @@ class MovePicker {
       case BAD_CAPTURES:
         if (bad_cur_ < n_bad_) return bad_[bad_cur_++];
         stage_ = QUIETS;
-        for (int i = 0; i < n_quiets_; i++) quiet_scores_[i] = history_[move_from(quiets_[i])][move_to(quiets_[i])];
+        for (int i = 0; i < n_quiets_; i++) {
+          Move q = quiets_[i];
+          quiet_scores_[i] = history_[move_from(q)][move_to(q)];
+          if (cont_) quiet_scores_[i] += cont_[pos_.board[move_from(q)] * 64 + move_to(q)];
+        }
         [[fallthrough]];
       case QUIETS:
         while (quiet_cur_ < n_quiets_) {
@@ -160,6 +164,7 @@ class MovePicker {
   Move killers_[2];
   const int (*history_)[64];
   Move counter_;
+  const int* cont_;
   Stage stage_ = HASH;
   Move caps_[MAX_MOVES], bad_[MAX_MOVES], promos_[MAX_MOVES], quiets_[MAX_MOVES];
   int cap_scores_[MAX_MOVES], quiet_scores_[MAX_MOVES];
@@ -186,6 +191,7 @@ void Searcher::clear_history() {
   std::memset(killers_, 0, sizeof(killers_));
   std::memset(history_, 0, sizeof(history_));
   std::memset(countermoves_, 0, sizeof(countermoves_));
+  std::fill(conthist_.begin(), conthist_.end(), 0);
 }
 
 void Searcher::new_game() {
@@ -195,6 +201,12 @@ void Searcher::new_game() {
 
 // History gravity: bonuses saturate at +/-HISTORY_MAX, so old information fades as new arrives.
 constexpr int HISTORY_MAX = 16384;
+void Searcher::update_cont(int* row, const Position& pos, Move m, int bonus) {
+  if (!row) return;
+  int& h = row[pos.board[move_from(m)] * 64 + move_to(m)];
+  h += bonus - h * std::abs(bonus) / HISTORY_MAX;
+}
+
 void Searcher::update_history(int side, Move m, int bonus) {
   int& h = history_[side][move_from(m)][move_to(m)];
   h += bonus - h * std::abs(bonus) / HISTORY_MAX;
@@ -417,7 +429,9 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
   // Counter move: the quiet reply that last refuted the opponent's previous move (piece + destination).
   Move prev = ply >= 1 ? move_stack_[ply - 1] : NO_MOVE;
   Move counter = prev != NO_MOVE ? countermoves_[pos.board[move_to(prev)]][move_to(prev)] : NO_MOVE;
-  MovePicker picker(pos, list, hash_move, ply < MAX_PLY ? killers_[ply] : nullptr, history_[pos.side], counter);
+  int* cont = cont_row(prev, pos);
+  MovePicker picker(pos, list, hash_move, ply < MAX_PLY ? killers_[ply] : nullptr, history_[pos.side], counter,
+                    cont);
   int alpha_orig = alpha;
   Move best = NO_MOVE;
   int searched = 0, legal = 0;
@@ -470,7 +484,11 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
         if (prev != NO_MOVE) countermoves_[pos.board[move_to(prev)]][move_to(prev)] = m;
         int bonus = std::min(depth * depth, 400);
         update_history(pos.side, m, bonus);
-        for (int i = 0; i < n_quiets; i++) update_history(pos.side, quiets_tried[i], -bonus);
+        update_cont(cont, pos, m, bonus);
+        for (int i = 0; i < n_quiets; i++) {
+          update_history(pos.side, quiets_tried[i], -bonus);
+          update_cont(cont, pos, quiets_tried[i], -bonus);
+        }
       }
       return beta;
     }
