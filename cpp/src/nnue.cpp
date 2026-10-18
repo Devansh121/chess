@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <sstream>
 
 #if defined(__AVX2__)
 #include <immintrin.h>
@@ -14,7 +15,7 @@ namespace nnue {
 namespace {
 
 template <typename T>
-bool read_raw(std::ifstream& in, T* out, size_t count) {
+bool read_raw(std::istream& in, T* out, size_t count) {
   in.read(reinterpret_cast<char*>(out), std::streamsize(count * sizeof(T)));
   return bool(in);
 }
@@ -100,12 +101,21 @@ inline void hidden_layer(const uint8_t* h, const int8_t* w, int width, int h2, i
 }  // namespace
 
 std::string Network::load(const std::string& path) {
-  std::ifstream in(path, std::ios::binary);
-  if (!in) return "cannot open " + path;
+  std::ifstream file(path, std::ios::binary);
+  if (!file) return "cannot open " + path;
+  std::ostringstream bytes;
+  bytes << file.rdbuf();
+  std::string data = bytes.str();
+  std::string err = load_from_memory(data.data(), data.size());
+  return err.empty() ? err : err + " (" + path + ")";
+}
+
+std::string Network::load_from_memory(const void* data, size_t size) {
+  std::istringstream in(std::string(static_cast<const char*>(data), size), std::ios::binary);
   char magic[4];
   uint32_t header[5];
   float cp_scale;
-  if (!read_raw(in, magic, 4) || std::memcmp(magic, "CHNN", 4) != 0) return "not a .nnue file: " + path;
+  if (!read_raw(in, magic, 4) || std::memcmp(magic, "CHNN", 4) != 0) return "not a .nnue file";
   if (!read_raw(in, header, 5) || !read_raw(in, &cp_scale, 1)) return "truncated header";
   uint32_t version = header[0], a = header[1], inputs = header[2], h1 = header[3], h2 = header[4];
   if (version != 1) return "unsupported version " + std::to_string(version);

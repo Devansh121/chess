@@ -69,16 +69,18 @@ void allocate_ms(const Position& pos, double wtime, double btime, double winc, d
   limits.soft_ms = std::max(5.0, std::min(soft, limits.time_ms));
 }
 
+// net_file: "" = the embedded network (hand-written eval if the build has none), "hce" = hand-written.
 void bench(int depth, const std::string& net_file) {
   Searcher s(16);
   nnue::Network net;
-  if (!net_file.empty()) {
-    std::string err = net.load(net_file);
-    if (!err.empty()) {
+  if (net_file != "hce") {
+    std::string err = net_file.empty() ? net.load_embedded() : net.load(net_file);
+    if (err.empty()) {
+      s.set_network(&net);
+    } else if (!net_file.empty()) {
       std::printf("bench: %s\n", err.c_str());
       return;
     }
-    s.set_network(&net);
   }
   U64 total = 0;
   auto start = std::chrono::steady_clock::now();
@@ -110,6 +112,11 @@ int main(int argc, char** argv) {
   Searcher searcher(64);
   nnue::Network network;
   std::string eval_file;
+  // The default evaluation is the network built into the binary, if there is one.
+  if (network.load_embedded().empty()) {
+    eval_file = "<embedded>";
+    searcher.set_network(&network);
+  }
   // Lazy SMP: helper searchers share the main searcher's transposition table.
   std::vector<std::unique_ptr<Searcher>> helpers;
   auto set_threads = [&](int n) {
@@ -142,7 +149,7 @@ int main(int argc, char** argv) {
       send(std::string("id name ") + NAME);
       send(std::string("id author ") + AUTHOR);
       send("option name Hash type spin default 64 min 1 max 4096");
-      send("option name EvalFile type string default <empty>");
+      send("option name EvalFile type string default <embedded>");
       send("option name Threads type spin default 1 min 1 max 256");
       send("uciok");
     } else if (cmd == "isready") {
@@ -163,12 +170,14 @@ int main(int argc, char** argv) {
         std::string rest;
         std::getline(in, rest);  // paths may contain spaces
         value += rest;
-        if (value.empty() || value == "<empty>") {
+        if (value == "<hce>" || value == "<empty>") {
           set_network_all(nullptr);
           eval_file.clear();
           send("info string using the hand-written evaluation");
         } else {
-          std::string err = network.load(value);
+          bool embedded = value.empty() || value == "<embedded>";
+          std::string err = embedded ? network.load_embedded() : network.load(value);
+          if (embedded) value = "<embedded>";
           if (err.empty()) {
             eval_file = value;
             set_network_all(&network);
