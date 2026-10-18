@@ -3,6 +3,17 @@
 A small chess engine. Inspired by George Hotz's
 [twitchchess](https://github.com/geohot/twitchchess) streams (2018), rebuilt from scratch.
 
+## Building the C++ engine
+
+```sh
+cmake -S cpp -B cpp/build && cmake --build cpp/build -j    # normal build, tuned for this CPU
+tools/build_pgo.sh                                          # profile-guided build -> cpp/build-pgo (~12% faster)
+cpp/build-pgo/chess-engine bench 13                         # same node count as cpp/build, higher nps
+```
+
+`tools/build_pgo.sh` builds an instrumented engine, records a profile from short self-play games and
+rebuilds with it. It uses `$CXX` (GCC by default; Clang also works). Use the PGO build for timed matches.
+
 ## Baseline (twitchchess, measured on an RTX 4050 laptop, CPython)
 
 | Engine | Search | Time per move |

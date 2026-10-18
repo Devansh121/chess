@@ -34,6 +34,13 @@ jobs:
       - run: cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release -DNATIVE=OFF
       - run: cmake --build cpp/build -j 4
       - run: ctest --test-dir cpp/build --output-on-failure
+      - name: PGO build searches the same tree
+        run: |
+          tools/build_pgo.sh
+          plain=$(cpp/build/chess-engine bench | awk '{print $4}')
+          pgo=$(cpp/build-pgo/chess-engine bench | awk '{print $4}')
+          echo "bench nodes: plain $plain, pgo $pgo"
+          test "$plain" = "$pgo"
 
   cpp-sanitize:
     # Memory and undefined-behaviour errors that a release build can silently survive.
