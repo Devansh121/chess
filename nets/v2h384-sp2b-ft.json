@@ -1,0 +1,47 @@
+{
+  "args": {
+    "name": "v2h384-sp2b-ft",
+    "data": [
+      "data/processed",
+      "data/processed-sp2b:20"
+    ],
+    "init": "nets/v2h384-300m.pt",
+    "out": "nets",
+    "shards": 0,
+    "positions": 0,
+    "epochs": 3,
+    "batch_size": 16384,
+    "lr": 0.0003,
+    "decided": "keep",
+    "cp_scale": 400.0,
+    "seed": 0,
+    "arch": "v2",
+    "hidden1": 384
+  },
+  "device": "cuda",
+  "params": 320321,
+  "epochs": [
+    {
+      "epoch": 1,
+      "train_mse": 0.022030835664291506,
+      "val_mse": 0.02501452472474628,
+      "positions": 58499848,
+      "secs": 83.99236059188843
+    },
+    {
+      "epoch": 2,
+      "train_mse": 0.021594269853756995,
+      "val_mse": 0.03065673547672487,
+      "positions": 58499848,
+      "secs": 83.97900247573853
+    },
+    {
+      "epoch": 3,
+      "train_mse": 0.021440032941281544,
+      "val_mse": 0.027006494136914923,
+      "positions": 58499848,
+      "secs": 85.56871485710144
+    }
+  ],
+  "best_val_mse": 0.02501452472474628
+}
