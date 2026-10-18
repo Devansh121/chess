@@ -436,22 +436,22 @@ impl Searcher {
             self.stack.push(next.hash);
             let p = ply as usize;
             let killer = p < MAX_PLY && (m == self.killers[p][0] || m == self.killers[p][1]);
-            let score;
             // Late-move reductions: late quiet moves first get a reduced zero-window search.
-            if searched >= 3 && depth >= 3 && quiet && !killer && !in_check && !gives_check {
-                let mut r = lmr_table()[depth.min(63) as usize][searched.min(63) as usize];
-                if pv_node {
-                    r = (r - 1).max(0);
-                }
-                let reduced = (depth - 1 - r).max(1);
-                let mut s = -self.negamax(&next, reduced, -alpha - 1, -alpha, ply + 1, true);
-                if s > alpha && reduced < depth - 1 && !self.aborted {
-                    s = self.pvs(&next, depth - 1, alpha, beta, ply + 1, false);
-                }
-                score = s;
-            } else {
-                score = self.pvs(&next, depth - 1, alpha, beta, ply + 1, searched == 0);
-            }
+            let score =
+                if searched >= 3 && depth >= 3 && quiet && !killer && !in_check && !gives_check {
+                    let mut r = lmr_table()[depth.min(63) as usize][searched.min(63) as usize];
+                    if pv_node {
+                        r = (r - 1).max(0);
+                    }
+                    let reduced = (depth - 1 - r).max(1);
+                    let mut s = -self.negamax(&next, reduced, -alpha - 1, -alpha, ply + 1, true);
+                    if s > alpha && reduced < depth - 1 && !self.aborted {
+                        s = self.pvs(&next, depth - 1, alpha, beta, ply + 1, false);
+                    }
+                    s
+                } else {
+                    self.pvs(&next, depth - 1, alpha, beta, ply + 1, searched == 0)
+                };
             searched += 1;
             self.stack.pop();
             if self.aborted {
