@@ -89,8 +89,12 @@ def main():
   ap = argparse.ArgumentParser()
   ap.add_argument("name")
   ap.add_argument(
-    "--data", action="append", help="shard directory; repeat to train on several (validation: the first only)"
+    "--data",
+    action="append",
+    help="shard directory, optionally DIR:N to use its shards N times per epoch; repeat for several "
+    "(validation: the first only)",
   )
+  ap.add_argument("--init", help="start from these weights (a .pt state dict of the same arch) instead of random")
   ap.add_argument("--out", default="nets")
   ap.add_argument("--shards", type=int, default=0, help="train on the first K shards only (0 = all)")
   ap.add_argument("--positions", type=int, default=0, help="training positions per epoch (0 = all)")
@@ -108,14 +112,21 @@ def main():
   np.random.seed(args.seed)
   torch.manual_seed(args.seed)
   device = "cuda" if torch.cuda.is_available() else "cpu"
-  train_shards = [s for d in args.data for s in sorted(glob.glob(os.path.join(d, "train_*.npz")))]
+  dirs = []
+  for spec in args.data:
+    path, _, times = spec.rpartition(":") if spec.rpartition(":")[2].isdigit() else (spec, "", "1")
+    dirs.append((path, int(times)))
+  train_shards = [s for d, n in dirs for s in sorted(glob.glob(os.path.join(d, "train_*.npz"))) * n]
   if args.shards:
     train_shards = train_shards[: args.shards]
-  val_shards = sorted(glob.glob(os.path.join(args.data[0], "val_*.npz")))
+  val_shards = sorted(glob.glob(os.path.join(dirs[0][0], "val_*.npz")))
   if not train_shards or not val_shards:
     sys.exit(f"no shards in {args.data}; run scripts/build_dataset.py first")
 
-  model = ARCHS[args.arch]().to(device)
+  model = ARCHS[args.arch]()
+  if args.init:
+    model.load_state_dict(torch.load(args.init, map_location="cpu"))
+  model = model.to(device)
   opt = torch.optim.Adam(model.parameters(), lr=args.lr)
   sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda e: 0.5 * (1 + math.cos(math.pi * e / args.epochs)))
   os.makedirs(args.out, exist_ok=True)

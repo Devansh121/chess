@@ -104,3 +104,41 @@ def test_v2_shapes_and_padding():
   assert model(a).shape == (1,)
   # 769 x 256 shared input weights + 256 biases + 512 x 32 + 32 + 32 + 1 = 213,569
   assert sum(p.numel() for p in model.parameters()) == 213_569
+
+
+def test_data_repeat_and_init(tmp_path):
+  """DIR:N repeats a folder's shards; --init starts from given weights."""
+  rng = np.random.default_rng(1)
+  for d, n in (("a", 600), ("b", 300)):
+    (tmp_path / d).mkdir()
+    for name, size in (("train_000", n), ("val_000", 100)):
+      x = np.full((size, MAX_PIECES), PAD, np.uint16)
+      x[:, :8] = rng.integers(0, NUM_FEATURES, (size, 8))
+      np.savez(tmp_path / d / f"{name}.npz", x=x, y=np.full(size, 0.5, np.float16), cp=np.zeros(size, np.int16))
+  out = tmp_path / "nets"
+  args = ["--out", str(out), "--epochs", "1", "--batch-size", "128", "--arch", "v2"]
+  subprocess.run(
+    [sys.executable, "scripts/train.py", "base", "--data", str(tmp_path / "a")] + args,
+    check=True,
+    cwd=REPO,
+    capture_output=True,
+  )
+  subprocess.run(
+    [
+      sys.executable,
+      "scripts/train.py",
+      "mix",
+      "--data",
+      str(tmp_path / "a"),
+      "--data",
+      f"{tmp_path / 'b'}:3",
+      "--init",
+      str(out / "base.pt"),
+    ]
+    + args,
+    check=True,
+    cwd=REPO,
+    capture_output=True,
+  )
+  log = json.loads((out / "mix.json").read_text())
+  assert log["epochs"][0]["positions"] == 600 + 3 * 300
