@@ -142,3 +142,53 @@ def test_data_repeat_and_init(tmp_path):
   )
   log = json.loads((out / "mix.json").read_text())
   assert log["epochs"][0]["positions"] == 600 + 3 * 300
+
+
+V3_FENS = [  # with the side to move's expected bucket (nn/model.py KING_BUCKETS)
+  ("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 1),  # Ke1, mirrored to d1
+  ("r1bq1rk1/pppp1ppp/2n2n2/2b1p3/2B1P3/2N2N2/PPPP1PPP/R1BQ1RK1 b - - 0 1", 0),  # Kg8: g1 for Black, mirrored b1
+  ("2kr3r/ppp2ppp/8/8/8/8/PPP2PPP/1K1R3R w - - 0 1", 0),  # Kb1, not mirrored
+  ("8/8/3k4/8/8/4K3/8/8 w - - 0 1", 3),  # Ke3 -> d3
+  ("8/5k2/8/8/8/8/1K6/8 b - - 0 1", 2),  # Kf7: f2 for Black, mirrored c2
+]
+
+
+def test_v3_buckets_follow_the_own_king():
+  from nn.model import NUM_BUCKETS, bucketed
+
+  x = to_model_input(np.array([pack(fen_features(f)) for f, _ in V3_FENS]))
+  full, _ = bucketed(x)
+  for row, (fen, want) in zip(full, V3_FENS, strict=True):
+    active = row[row < NUM_BUCKETS * NUM_FEATURES]
+    assert set((active // NUM_FEATURES).tolist()) == {want}, fen
+
+
+ENGINE = os.path.join(REPO, "cpp", "build", "chess-engine")
+
+
+@pytest.mark.skipif(not os.path.exists(ENGINE), reason="needs the C++ engine (cmake build in cpp/build)")
+def test_v3_export_matches_the_cpp_engine(tmp_path):
+  # A random v3 network exported to .nnue must give the C++ engine's float reference the same logit as torch:
+  # this pins the bucket map, mirroring and factoriser folding on both sides.
+  from nn.model import ValueNetV3
+
+  torch.manual_seed(0)
+  model = ValueNetV3(hidden1=32)
+  with torch.no_grad():
+    model.inputs.weight.normal_(std=0.02)
+    model.inputs.weight[-1].zero_()
+  torch.save(model.state_dict(), tmp_path / "v3.pt")
+  (tmp_path / "v3.json").write_text(json.dumps({"args": {"arch": "v3", "hidden1": 32, "cp_scale": 400.0}}))
+  net = tmp_path / "v3.nnue"
+  subprocess.run([sys.executable, os.path.join(REPO, "scripts", "export_net.py"), tmp_path / "v3.pt", net], check=True)
+
+  commands = [f"setoption name EvalFile value {net}"]
+  for fen, _ in V3_FENS:
+    commands += [f"position fen {fen}", "eval"]
+  out = subprocess.run([ENGINE], input="\n".join(commands + ["quit"]), capture_output=True, text=True, check=True)
+  cpp = [float(line.split(" float ")[1]) for line in out.stdout.splitlines() if " float " in line]
+  x = to_model_input(np.array([pack(fen_features(f)) for f, _ in V3_FENS]))
+  with torch.no_grad():
+    want = model(x).tolist()
+  assert len(cpp) == len(want)
+  assert np.allclose(cpp, want, atol=1e-4), (cpp, want)

@@ -1,6 +1,7 @@
 // Network evaluation tests with a deterministic random network (written to a temp file and loaded through
 // the normal loader): incremental accumulator updates equal a full refresh at every node of small move
-// trees (covering captures, castling, en passant and promotion), and colour-flipped positions score the same.
+// trees (covering captures, castling, en passant, promotion and, for king buckets, king moves that change
+// bucket or mirror half), and colour-flipped positions score the same.
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -30,20 +31,29 @@ std::string write_random_net(int arch, int h1, int h2) {
     s ^= s << 17;
     return scale * (float(s % 20001) / 10000.0f - 1.0f);
   };
-  uint32_t header[5] = {1, uint32_t(arch), uint32_t(nnue::NUM_FEATURES + 1), uint32_t(h1), uint32_t(h2)};
+  // arch 3: the same 4-bucket map as nn/model.py KING_BUCKETS.
+  uint32_t buckets = arch == 3 ? 4 : 1;
+  uint8_t map[64] = {};
+  for (int sq = 0; sq < 64; sq++) map[sq] = sq < 8 ? (file_of(sq) < 2 ? 0 : 1) : sq < 16 ? 2 : 3;
+  uint32_t header[5] = {arch == 3 ? 2u : 1u, uint32_t(arch), uint32_t(buckets * nnue::NUM_FEATURES + 1),
+                        uint32_t(h1), uint32_t(h2)};
   float cp_scale = 400.0f;
   out.write("CHNN", 4);
   out.write(reinterpret_cast<char*>(header), sizeof(header));
   out.write(reinterpret_cast<char*>(&cp_scale), sizeof(cp_scale));
+  if (arch == 3) {
+    out.write(reinterpret_cast<char*>(&buckets), sizeof(buckets));
+    out.write(reinterpret_cast<char*>(map), sizeof(map));
+  }
   auto put = [&](size_t n, float scale) {
     for (size_t i = 0; i < n; i++) {
       float v = rnd(scale);
       out.write(reinterpret_cast<char*>(&v), sizeof(v));
     }
   };
-  put(size_t(nnue::NUM_FEATURES + 1) * h1, 0.05f);  // w1
-  put(h1, 0.1f);                                    // b1
-  put(size_t(h2) * arch * h1, 0.1f);                // w2
+  put(size_t(buckets * nnue::NUM_FEATURES + 1) * h1, 0.05f);  // w1
+  put(h1, 0.1f);                                              // b1
+  put(size_t(h2) * (arch == 1 ? 1 : 2) * h1, 0.1f);           // w2
   put(h2, 0.1f);                                    // b2
   put(h2, 0.5f);                                    // w3
   put(1, 0.1f);                                     // b3
@@ -104,7 +114,7 @@ int main() {
       "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",                             // en passant
       "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",      // promotions
   };
-  for (int arch = 1; arch <= 2; arch++) {
+  for (int arch = 1; arch <= 3; arch++) {
     nnue::Network net;
     std::string err = net.load(write_random_net(arch, 64, 16));
     check(err.empty(), "load arch " + std::to_string(arch) + (err.empty() ? "" : ": " + err));

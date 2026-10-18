@@ -24,6 +24,8 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: ruff check .
       - run: ruff format --check .
+      - name: Build the C++ engine (for the export-vs-engine test)
+        run: cmake -S cpp -B cpp/build -DNATIVE=OFF && cmake --build cpp/build -j 4 --target chess-engine
       - run: pytest -q
 
   cpp:

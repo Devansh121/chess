@@ -66,7 +66,64 @@ class ValueNetV2(nn.Module):
     return self.out(h).squeeze(-1)
 
 
-ARCHS = {"v1": ValueNet, "v2": ValueNetV2}
+# v3: v2 with king buckets. Each perspective's features are mirrored left-right when its own king is on
+# files e-h, then picked from one of NUM_BUCKETS copies of the 768 rows by that king's square (the
+# mirrored view only has files a-d). A factoriser row set shared by every bucket is trained alongside and
+# folded into each bucket at export, so rarely seen buckets still start from the common piece values.
+KING_BUCKETS = [  # by own-king square in the perspective's mirrored view, a1 = 0; files e-h never occur
+  0, 0, 1, 1, 0, 0, 0, 0,
+  2, 2, 2, 2, 0, 0, 0, 0,
+] + [3, 3, 3, 3, 0, 0, 0, 0] * 6  # fmt: skip
+NUM_BUCKETS = max(KING_BUCKETS) + 1
+OWN_KING = 5  # (own side 0 * 6 + king) in the feature layout
+
+
+def bucketed(x, num_buckets=NUM_BUCKETS):
+  """768-space indices (padded with NUM_FEATURES) -> (bucketed index, mirrored 768-space index), both padded.
+
+  Every position has exactly one own king, which picks the bucket and whether files are mirrored.
+  """
+  pad = x == NUM_FEATURES
+  ksq = torch.where(x // 64 == OWN_KING, x % 64, torch.zeros_like(x)).sum(dim=1, keepdim=True)
+  flip = torch.where(ksq % 8 >= 4, 7, 0)
+  plain = (x // 64) * 64 + ((x % 64) ^ flip)
+  bucket = torch.as_tensor(KING_BUCKETS, device=x.device)[ksq ^ flip]
+  full = bucket * NUM_FEATURES + plain
+  return torch.where(pad, num_buckets * NUM_FEATURES, full), torch.where(pad, x, plain)
+
+
+class ValueNetV3(nn.Module):
+  def __init__(self, hidden1=HIDDEN1, hidden2=HIDDEN2, num_buckets=NUM_BUCKETS):
+    super().__init__()
+    self.num_buckets = num_buckets
+    rows = num_buckets * NUM_FEATURES
+    self.inputs = nn.EmbeddingBag(rows + 1, hidden1, mode="sum", padding_idx=rows)
+    self.factor = nn.EmbeddingBag(NUM_FEATURES + 1, hidden1, mode="sum", padding_idx=NUM_FEATURES)
+    self.input_bias = nn.Parameter(torch.zeros(hidden1))
+    self.l2 = nn.Linear(2 * hidden1, hidden2)
+    self.out = nn.Linear(hidden2, 1)
+    nn.init.zeros_(self.inputs.weight)  # buckets start as the shared rows and learn the differences
+    nn.init.normal_(self.factor.weight, std=0.05)
+    with torch.no_grad():
+      self.factor.weight[NUM_FEATURES].zero_()
+
+  def accumulate(self, x):
+    full, plain = bucketed(x, self.num_buckets)
+    return torch.clamp(self.inputs(full) + self.factor(plain) + self.input_bias, 0.0, 1.0)
+
+  def forward(self, x):
+    h = torch.cat([self.accumulate(x), self.accumulate(other_perspective(x))], dim=1)
+    return self.out(torch.clamp(self.l2(h), 0.0, 1.0)).squeeze(-1)
+
+  def folded_input_weights(self):
+    """First-layer rows with the factoriser added to every bucket: [num_buckets * 768 + 1, hidden1]."""
+    w = self.inputs.weight.detach().clone()
+    shared = self.factor.weight.detach()[:NUM_FEATURES]
+    w[: self.num_buckets * NUM_FEATURES] += shared.repeat(self.num_buckets, 1)
+    return w
+
+
+ARCHS = {"v1": ValueNet, "v2": ValueNetV2, "v3": ValueNetV3}
 
 
 def to_model_input(x_uint16):
