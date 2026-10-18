@@ -55,8 +55,9 @@ bool insufficient_material(const Position& pos) {
 // instead of sorting everything up front, since most nodes cut off after one or two moves.
 class MovePicker {
  public:
-  MovePicker(const Position& pos, const MoveList& list, Move hash_move, const Move* killers, const int (*history)[64])
-      : pos_(pos), list_(list), hash_(hash_move), history_(history) {
+  MovePicker(const Position& pos, const MoveList& list, Move hash_move, const Move* killers, const int (*history)[64],
+             Move counter = NO_MOVE)
+      : pos_(pos), list_(list), hash_(hash_move), history_(history), counter_(counter) {
     killers_[0] = killers ? killers[0] : NO_MOVE;
     killers_[1] = killers ? killers[1] : NO_MOVE;
   }
@@ -92,7 +93,14 @@ class MovePicker {
           if (killer_cur_ == 1 && k != NO_MOVE) killers_[0] = NO_MOVE;  // not playable here; don't skip it later
           if (killer_cur_ == 2 && k != NO_MOVE && !in_quiets(k)) killers_[1] = NO_MOVE;
         }
+        stage_ = COUNTER;
+        [[fallthrough]];
+      case COUNTER:
         stage_ = BAD_CAPTURES;
+        if (counter_ != NO_MOVE && counter_ != hash_ && counter_ != killers_[0] && counter_ != killers_[1] &&
+            in_quiets(counter_))
+          return counter_;
+        counter_ = NO_MOVE;  // not returned, so don't skip it among the quiets
         [[fallthrough]];
       case BAD_CAPTURES:
         if (bad_cur_ < n_bad_) return bad_[bad_cur_++];
@@ -102,7 +110,7 @@ class MovePicker {
       case QUIETS:
         while (quiet_cur_ < n_quiets_) {
           Move m = pick(quiets_, quiet_scores_, quiet_cur_, n_quiets_);
-          if (m != killers_[0] && m != killers_[1]) return m;  // killers were already returned
+          if (m != killers_[0] && m != killers_[1] && m != counter_) return m;  // already returned
         }
         stage_ = DONE;
         [[fallthrough]];
@@ -113,7 +121,7 @@ class MovePicker {
   }
 
  private:
-  enum Stage { HASH, SPLIT, CAPTURES, PROMOTIONS, KILLERS, BAD_CAPTURES, QUIETS, DONE };
+  enum Stage { HASH, SPLIT, CAPTURES, PROMOTIONS, KILLERS, COUNTER, BAD_CAPTURES, QUIETS, DONE };
 
   void split() {
     for (int i = 0; i < list_.size; i++) {
@@ -151,6 +159,7 @@ class MovePicker {
   Move hash_;
   Move killers_[2];
   const int (*history_)[64];
+  Move counter_;
   Stage stage_ = HASH;
   Move caps_[MAX_MOVES], bad_[MAX_MOVES], promos_[MAX_MOVES], quiets_[MAX_MOVES];
   int cap_scores_[MAX_MOVES], quiet_scores_[MAX_MOVES];
@@ -176,12 +185,12 @@ Searcher::Searcher(TT* shared_tt) : tt_(shared_tt) { clear_history(); }
 void Searcher::clear_history() {
   std::memset(killers_, 0, sizeof(killers_));
   std::memset(history_, 0, sizeof(history_));
+  std::memset(countermoves_, 0, sizeof(countermoves_));
 }
 
 void Searcher::new_game() {
   tt_->clear();
-  std::memset(killers_, 0, sizeof(killers_));
-  std::memset(history_, 0, sizeof(history_));
+  clear_history();
 }
 
 // History gravity: bonuses saturate at +/-HISTORY_MAX, so old information fades as new arrives.
@@ -375,6 +384,7 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
     int r = 2 + depth / 6;
     Position next = pos.make_null();
     stack_.push_back(next.hash);
+    move_stack_[ply] = NO_MOVE;
     int score = -negamax(next, depth - 1 - r, -beta, -beta + 1, ply + 1, false);
     stack_.pop_back();
     if (aborted_) return 0;
@@ -383,7 +393,10 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
 
   MoveList list;
   generate(pos, list);
-  MovePicker picker(pos, list, hash_move, ply < MAX_PLY ? killers_[ply] : nullptr, history_[pos.side]);
+  // Counter move: the quiet reply that last refuted the opponent's previous move (piece + destination).
+  Move prev = ply >= 1 ? move_stack_[ply - 1] : NO_MOVE;
+  Move counter = prev != NO_MOVE ? countermoves_[pos.board[move_to(prev)]][move_to(prev)] : NO_MOVE;
+  MovePicker picker(pos, list, hash_move, ply < MAX_PLY ? killers_[ply] : nullptr, history_[pos.side], counter);
   int alpha_orig = alpha;
   Move best = NO_MOVE;
   int searched = 0, legal = 0;
@@ -404,6 +417,7 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
       continue;
 
     stack_.push_back(next.hash);
+    move_stack_[ply] = m;
     int score;
     // Late-move reductions: quiet moves sorted late are rarely best, so search them shallower first
     // with a zero window; if one beats alpha anyway, it gets the normal search.
@@ -427,6 +441,7 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
           killers_[ply][1] = killers_[ply][0];
           killers_[ply][0] = m;
         }
+        if (prev != NO_MOVE) countermoves_[pos.board[move_to(prev)]][move_to(prev)] = m;
         int bonus = std::min(depth * depth, 400);
         update_history(pos.side, m, bonus);
         for (int i = 0; i < n_quiets; i++) update_history(pos.side, quiets_tried[i], -bonus);
@@ -457,6 +472,7 @@ int Searcher::root_search(const Position& pos, int depth, Move prev_best, Move& 
     Position next = pos.make(m);
     tt_->prefetch(next.hash);
     stack_.push_back(next.hash);
+    move_stack_[0] = m;
     int score = pvs(next, depth - 1, alpha, beta, 1, searched == 0);
     searched++;
     stack_.pop_back();
