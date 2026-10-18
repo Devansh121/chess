@@ -74,3 +74,23 @@ binary, 800 games at 0.1 s/move (400 from the 40 openings + 400 with 4 extra see
 Longer training of the 256-wide net stopped paying after 5 epochs. Width paid off at 384, but at 448 the
 slightly better loss (-1.9%) no longer made up for 11% less speed at this time control: 384 is the sweet
 spot here. Next lever: more data (the size curve was still improving at every doubling).
+
+## Round 4: king buckets (arch v3, #64)
+
+v2 plus left-right mirroring on the own king's half and 4 king buckets (back rank a-b, back rank c-d,
+2nd rank, beyond), with a factoriser folded in at export. Validation on Lichess (the original 500k set)
+and on held-out self-play positions, which are closer to what the search actually evaluates. Matches:
+same PGO binary, 800 games at 5s+0.05s unless noted.
+
+| Name | Data | Lichess val | Self-play 2b val | Self-play 1 val | nodes/s | Match |
+|---|---|---|---|---|---|---|
+| v2h384-150m | ~149M Lichess | 0.02504 | 0.01576 | 0.01637 | 2.86M | |
+| v3h384-150m | same | 0.02297 | 0.01514 | 0.01677 | 2.68M | -6 ± 20 vs v2h384-150m; -4 ± 21 at 100k nodes |
+| v2h384-300m | ~297M Lichess | 0.02443 | 0.01430 | 0.01412 | 2.86M | |
+| v2h384-sp2b-ft4 (#62 default) | v2h384-300m + self-play 2b x4 | 0.02395 | 0.01430 | 0.01533 | 2.86M | |
+| **v3h384-300m** | ~297M Lichess | **0.02235** | **0.01304** | **0.01401** | 2.68M | **+58 ± 22 vs #62's net** |
+
+At 150M positions the buckets mainly fit the Lichess positions better and did not help in play, at equal
+time or equal nodes. With twice the data they also fit self-play positions 9% better than v2 on the same
+data, and that shows up in games despite 6% fewer nodes/s. The Lichess-only validation loss was
+misleading here: the self-play validation sets track match results much better.
