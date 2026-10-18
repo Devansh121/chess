@@ -382,6 +382,14 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
   if (ply < ACC_STACK) eval_stack_[ply] = static_eval;
   bool improving = !in_check && ply >= 2 && eval_stack_[ply - 2] != -INF && static_eval > eval_stack_[ply - 2];
 
+  // Razoring: far below alpha near the leaves, check with a quiescence search whether any capture can
+  // close the gap; if not, the node fails low without a full search.
+  if (!pv_node && !in_check && depth <= 3 && static_eval + 250 * depth <= alpha && std::abs(alpha) < MATE_BOUND) {
+    int q = quiesce(pos, alpha - 1, alpha, ply);
+    if (aborted_) return 0;
+    if (q < alpha) return q;
+  }
+
   // Reverse futility pruning: close to the leaves, if the static eval beats beta by a margin that
   // grows with the remaining depth, the opponent is unlikely to recover in so few moves.
   if (!pv_node && !in_check && depth <= 6 && std::abs(beta) < MATE_BOUND && static_eval - 80 * (depth - improving) >= beta)
@@ -389,7 +397,7 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
 
   if (allow_null && !pv_node && depth >= 3 && !in_check && pos.has_non_pawn_material(pos.side) &&
       static_eval >= beta) {
-    int r = 2 + depth / 6;
+    int r = 3 + depth / 3 + std::min((static_eval - beta) / 200, 3);  // further above beta: reduce more
     Position next = pos.make_null();
     stack_.push_back(next.hash);
     move_stack_[ply] = NO_MOVE;
