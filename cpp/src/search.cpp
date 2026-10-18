@@ -425,6 +425,9 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
     if (searched >= 3 && depth >= 3 && quiet && !killer && !in_check && !gives_check) {
       int r = lmr_table[std::min(depth, 63)][std::min(searched, 63)];
       if (pv_node) r = std::max(0, r - 1);
+      // Quiet moves with a strong cutoff history are reduced less, poor ones more (history is in
+      // [-16384, 16384], so this adjusts by up to 2 plies).
+      r = std::max(0, r - history_[pos.side][move_from(m)][move_to(m)] / 8192);
       int reduced = std::max(1, depth - 1 - r);
       score = -negamax(next, reduced, -alpha - 1, -alpha, ply + 1);
       if (score > alpha && reduced < depth - 1 && !aborted_) score = pvs(next, depth - 1, alpha, beta, ply + 1, false);
