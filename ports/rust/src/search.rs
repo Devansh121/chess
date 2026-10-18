@@ -20,6 +20,22 @@ const ORDER_CAPTURE: i32 = 1_000_000;
 const ORDER_PROMOTION: i32 = 900_000;
 const ORDER_KILLER: i32 = 800_000;
 
+const HISTORY_MAX: i32 = 16384;
+
+/// Late-move reduction in plies by remaining depth and moves searched (same formula as the C++ engine).
+fn lmr_table() -> &'static [[i32; 64]; 64] {
+    static T: std::sync::OnceLock<[[i32; 64]; 64]> = std::sync::OnceLock::new();
+    T.get_or_init(|| {
+        let mut t = [[0i32; 64]; 64];
+        for (d, row) in t.iter_mut().enumerate().skip(1) {
+            for (m, r) in row.iter_mut().enumerate().skip(1) {
+                *r = (0.75 + (d as f64).ln() * (m as f64).ln() / 2.25) as i32;
+            }
+        }
+        t
+    })
+}
+
 const BOUND_EXACT: u8 = 1;
 const BOUND_LOWER: u8 = 2;
 const BOUND_UPPER: u8 = 3;
@@ -60,6 +76,7 @@ pub struct Searcher {
     tt: Vec<TTEntry>,
     tt_mask: usize,
     killers: [[Move; 2]; MAX_PLY],
+    history: Box<[[[i32; 64]; 64]; 2]>, // quiet-move history: bonus for cutoffs, malus for quiets tried before one
     stack: Vec<u64>,
     nodes: u64,
     limits: Limits,
@@ -129,6 +146,7 @@ impl Searcher {
             tt: Vec::new(),
             tt_mask: 0,
             killers: [[NO_MOVE; 2]; MAX_PLY],
+            history: Box::new([[[0; 64]; 64]; 2]),
             stack: Vec::new(),
             nodes: 0,
             limits: Limits::default(),
@@ -153,6 +171,13 @@ impl Searcher {
     pub fn new_game(&mut self) {
         self.tt.iter_mut().for_each(|e| *e = TTEntry::default());
         self.killers = [[NO_MOVE; 2]; MAX_PLY];
+        *self.history = [[[0; 64]; 64]; 2];
+    }
+
+    /// History gravity: bonuses saturate at +/-HISTORY_MAX, so old information fades as new arrives.
+    fn update_history(&mut self, side: usize, m: Move, bonus: i32) {
+        let h = &mut self.history[side][move_from(m)][move_to(m)];
+        *h += bonus - *h * bonus.abs() / HISTORY_MAX;
     }
 
     fn probe(&self, key: u64) -> Option<TTEntry> {
@@ -224,7 +249,7 @@ impl Searcher {
             } else if ply < MAX_PLY && m == self.killers[ply][1] {
                 ORDER_KILLER - 1
             } else {
-                0
+                self.history[pos.side][move_from(m)][move_to(m)] // in [-HISTORY_MAX, HISTORY_MAX], below killers
             };
         }
         // Insertion sort, descending (lists are short).
@@ -288,7 +313,36 @@ impl Searcher {
         alpha
     }
 
-    fn negamax(&mut self, pos: &Position, depth: i32, mut alpha: i32, beta: i32, ply: i32) -> i32 {
+    /// Principal variation search for one child: the first move gets the full window; later moves a
+    /// zero-width window, re-searched with the full window only if they beat alpha.
+    fn pvs(
+        &mut self,
+        next: &Position,
+        depth: i32,
+        alpha: i32,
+        beta: i32,
+        ply: i32,
+        first: bool,
+    ) -> i32 {
+        if first || beta - alpha == 1 {
+            return -self.negamax(next, depth, -beta, -alpha, ply, true);
+        }
+        let mut score = -self.negamax(next, depth, -alpha - 1, -alpha, ply, true);
+        if score > alpha && score < beta && !self.aborted {
+            score = -self.negamax(next, depth, -beta, -alpha, ply, true);
+        }
+        score
+    }
+
+    fn negamax(
+        &mut self,
+        pos: &Position,
+        mut depth: i32,
+        mut alpha: i32,
+        beta: i32,
+        ply: i32,
+        allow_null: bool,
+    ) -> i32 {
         self.nodes += 1;
         if self.time_up() {
             self.aborted = true;
@@ -296,6 +350,11 @@ impl Searcher {
         }
         if self.is_draw(pos) {
             return 0;
+        }
+        // Check extension: checks are forcing and have few replies, so look one ply further.
+        let in_check = pos.in_check();
+        if in_check && (ply as usize) < MAX_PLY - 1 {
+            depth += 1;
         }
         if depth <= 0 {
             return self.quiesce(pos, alpha, beta, ply);
@@ -313,41 +372,120 @@ impl Searcher {
                 }
             }
         }
+        let pv_node = beta - alpha > 1;
+        let static_eval = if in_check { -INF } else { evaluate(pos) };
+
+        // Reverse futility pruning: near the leaves, a static eval far above beta is very unlikely to drop.
+        if !pv_node
+            && !in_check
+            && depth <= 6
+            && beta.abs() < MATE_BOUND
+            && static_eval - 80 * depth >= beta
+        {
+            return static_eval;
+        }
+        // Null-move pruning: if passing still holds beta after a reduced search, a real move would too.
+        if allow_null
+            && !pv_node
+            && depth >= 3
+            && !in_check
+            && pos.has_non_pawn_material(pos.side)
+            && static_eval >= beta
+        {
+            let r = 2 + depth / 6;
+            let next = pos.make_null();
+            self.stack.push(next.hash);
+            let score = -self.negamax(&next, depth - 1 - r, -beta, -beta + 1, ply + 1, false);
+            self.stack.pop();
+            if self.aborted {
+                return 0;
+            }
+            if score >= beta {
+                return beta;
+            }
+        }
+
         let mut list = MoveList::new();
         generate(pos, &mut list, false);
         self.order(pos, &mut list, hash_move, ply as usize);
         let alpha_orig = alpha;
         let mut best = NO_MOVE;
-        let mut any_legal = false;
+        let (mut searched, mut legal) = (0i32, 0i32);
+        let mut quiets_tried = [NO_MOVE; MAX_MOVES];
+        let mut n_quiets = 0usize;
         for i in 0..list.len {
             let m = list.moves[i];
             if !is_legal(pos, m) {
                 continue;
             }
-            any_legal = true;
+            legal += 1;
             let next = pos.make(m);
+            let quiet = !is_capture(m) && !is_promotion(m);
+            let gives_check = next.in_check();
+            // Futility pruning: near the leaves, skip quiet moves that can't lift the eval to alpha.
+            if !pv_node
+                && !in_check
+                && depth <= 3
+                && searched > 0
+                && quiet
+                && !gives_check
+                && static_eval + 100 + 100 * depth <= alpha
+            {
+                continue;
+            }
             self.stack.push(next.hash);
-            let score = -self.negamax(&next, depth - 1, -beta, -alpha, ply + 1);
+            let p = ply as usize;
+            let killer = p < MAX_PLY && (m == self.killers[p][0] || m == self.killers[p][1]);
+            let score;
+            // Late-move reductions: late quiet moves first get a reduced zero-window search.
+            if searched >= 3 && depth >= 3 && quiet && !killer && !in_check && !gives_check {
+                let mut r = lmr_table()[depth.min(63) as usize][searched.min(63) as usize];
+                if pv_node {
+                    r = (r - 1).max(0);
+                }
+                let reduced = (depth - 1 - r).max(1);
+                let mut s = -self.negamax(&next, reduced, -alpha - 1, -alpha, ply + 1, true);
+                if s > alpha && reduced < depth - 1 && !self.aborted {
+                    s = self.pvs(&next, depth - 1, alpha, beta, ply + 1, false);
+                }
+                score = s;
+            } else {
+                score = self.pvs(&next, depth - 1, alpha, beta, ply + 1, searched == 0);
+            }
+            searched += 1;
             self.stack.pop();
             if self.aborted {
                 return 0;
             }
             if score >= beta {
                 self.store(pos.hash, m, to_tt(beta, ply), depth, BOUND_LOWER);
-                let p = ply as usize;
-                if !is_capture(m) && p < MAX_PLY && self.killers[p][0] != m {
-                    self.killers[p][1] = self.killers[p][0];
-                    self.killers[p][0] = m;
+                if quiet {
+                    if p < MAX_PLY && self.killers[p][0] != m {
+                        self.killers[p][1] = self.killers[p][0];
+                        self.killers[p][0] = m;
+                    }
+                    let bonus = (depth * depth).min(400);
+                    self.update_history(pos.side, m, bonus);
+                    for &q in &quiets_tried[..n_quiets] {
+                        self.update_history(pos.side, q, -bonus);
+                    }
                 }
                 return beta;
+            }
+            if quiet {
+                quiets_tried[n_quiets] = m;
+                n_quiets += 1;
             }
             if score > alpha {
                 alpha = score;
                 best = m;
             }
         }
-        if !any_legal {
-            return if pos.in_check() { -(MATE - ply) } else { 0 };
+        if legal == 0 {
+            return if in_check { -(MATE - ply) } else { 0 };
+        }
+        if searched == 0 {
+            return alpha; // every legal move was pruned: a fail low, not a mate or stalemate
         }
         let bound = if alpha > alpha_orig {
             BOUND_EXACT
@@ -358,17 +496,25 @@ impl Searcher {
         alpha
     }
 
-    fn root(&mut self, pos: &Position, depth: i32, prev_best: Move) -> (i32, Move) {
+    /// Searches every root move inside (alpha, beta): returns alpha with NO_MOVE on a fail low, beta with
+    /// the move on a fail high.
+    fn root(
+        &mut self,
+        pos: &Position,
+        depth: i32,
+        prev_best: Move,
+        mut alpha: i32,
+        beta: i32,
+    ) -> (i32, Move) {
         let mut list = MoveList::new();
         generate_legal(pos, &mut list);
         self.order(pos, &mut list, prev_best, 0);
-        let (mut alpha, beta) = (-INF, INF);
         let mut best = NO_MOVE;
         for i in 0..list.len {
             let m = list.moves[i];
             let next = pos.make(m);
             self.stack.push(next.hash);
-            let score = -self.negamax(&next, depth - 1, -beta, -alpha, 1);
+            let score = self.pvs(&next, depth - 1, alpha, beta, 1, i == 0);
             self.stack.pop();
             if self.aborted {
                 return (0, NO_MOVE);
@@ -376,6 +522,9 @@ impl Searcher {
             if score > alpha {
                 alpha = score;
                 best = m;
+                if alpha >= beta {
+                    return (beta, best);
+                }
             }
         }
         (alpha, best)
@@ -411,12 +560,41 @@ impl Searcher {
         result.best = legal.moves[0];
         for depth in 1..=self.limits.depth {
             self.can_abort = depth > 1; // depth 1 always completes
-            let prev = if result.depth > 0 {
+            let mut prev = if result.depth > 0 {
                 result.best
             } else {
                 NO_MOVE
             };
-            let (score, best) = self.root(root, depth, prev);
+            let (mut score, mut best);
+            if depth >= 5 {
+                // Aspiration window around the previous score; widen the failing side on a miss.
+                let mut delta = 50;
+                let (mut a, mut b) = (
+                    (result.score - delta).max(-INF),
+                    (result.score + delta).min(INF),
+                );
+                loop {
+                    (score, best) = self.root(root, depth, prev, a, b);
+                    if self.aborted {
+                        break;
+                    }
+                    if score <= a {
+                        a = (a - delta).max(-INF);
+                    } else if score >= b {
+                        b = (b + delta).min(INF);
+                        prev = best; // the fail-high move goes first in the re-search
+                    } else {
+                        break;
+                    }
+                    delta *= 2;
+                    if delta > 1000 {
+                        a = -INF;
+                        b = INF;
+                    }
+                }
+            } else {
+                (score, best) = self.root(root, depth, prev, -INF, INF);
+            }
             if self.aborted {
                 break;
             }

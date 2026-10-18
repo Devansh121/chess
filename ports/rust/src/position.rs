@@ -249,6 +249,28 @@ impl Position {
         s
     }
 
+    /// Pass the turn (for null-move pruning).
+    pub fn make_null(&self) -> Position {
+        let z = zobrist();
+        let mut n = *self;
+        if n.ep != NO_SQ {
+            n.hash ^= z.ep_file[file_of(n.ep as usize)];
+        }
+        n.ep = NO_SQ;
+        n.halfmove += 1;
+        n.side ^= 1;
+        n.hash ^= z.side;
+        n
+    }
+
+    pub fn has_non_pawn_material(&self, color: usize) -> bool {
+        self.pieces[color][KNIGHT]
+            | self.pieces[color][BISHOP]
+            | self.pieces[color][ROOK]
+            | self.pieces[color][QUEEN]
+            != 0
+    }
+
     pub fn make(&self, m: Move) -> Position {
         let z = zobrist();
         let mut n = *self;
