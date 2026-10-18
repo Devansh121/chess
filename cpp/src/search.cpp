@@ -361,10 +361,13 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
   if (depth <= 0) return quiesce(pos, alpha, beta, ply);
 
   Move hash_move = NO_MOVE;
+  int tt_score = 0, tt_bound = BOUND_NONE;
   if (TTEntry e; tt_->probe(pos.hash, e)) {
     hash_move = e.move;
+    tt_score = from_tt(e.score, ply);
+    tt_bound = e.bound;
     if (e.depth >= depth) {
-      int s = from_tt(e.score, ply);
+      int s = tt_score;
       if (e.bound == BOUND_EXACT || (e.bound == BOUND_LOWER && s >= beta) || (e.bound == BOUND_UPPER && s <= alpha))
         return s;
     }
@@ -381,6 +384,12 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
   // "Improving": better than this side's eval two plies ago, so reverse futility pruning is more cautious.
   if (ply < ACC_STACK) eval_stack_[ply] = static_eval;
   bool improving = !in_check && ply >= 2 && eval_stack_[ply - 2] != -INF && static_eval > eval_stack_[ply - 2];
+  // A stored search score is a better estimate than the static eval when its bound points the right
+  // way; the pruning decisions below use it.
+  if (!in_check && std::abs(tt_score) < MATE_BOUND &&
+      (tt_bound == BOUND_EXACT || (tt_bound == BOUND_LOWER && tt_score > static_eval) ||
+       (tt_bound == BOUND_UPPER && tt_score < static_eval)))
+    static_eval = tt_score;
 
   // Reverse futility pruning: close to the leaves, if the static eval beats beta by a margin that
   // grows with the remaining depth, the opponent is unlikely to recover in so few moves.
@@ -438,7 +447,10 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
     bool killer = ply < MAX_PLY && (m == killers_[ply][0] || m == killers_[ply][1]);
     if (searched >= 3 && depth >= 3 && quiet && !killer && !in_check && !gives_check) {
       int r = lmr_table[std::min(depth, 63)][std::min(searched, 63)];
-      if (pv_node) r = std::max(0, r - 1);
+      if (pv_node) r--;
+      if (!improving) r++;
+      r -= history_[pos.side][move_from(m)][move_to(m)] / 8192;  // -2..+2: trust the move ordering's history
+      r = std::max(0, r);
       int reduced = std::max(1, depth - 1 - r);
       score = -negamax(next, reduced, -alpha - 1, -alpha, ply + 1);
       if (score > alpha && reduced < depth - 1 && !aborted_) score = pvs(next, depth - 1, alpha, beta, ply + 1, false);
