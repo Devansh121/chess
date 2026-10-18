@@ -45,7 +45,10 @@ class Searcher {
   // A searcher sharing `tt` with others (Lazy SMP helper threads).
   explicit Searcher(TT* shared_tt);
   // Evaluate with this network instead of the hand-written evaluation (nullptr: hand-written).
-  void set_network(const nnue::Network* net) { net_ = net; }
+  void set_network(const nnue::Network* net) {
+    net_ = net;
+    std::fill(eval_cache_.begin(), eval_cache_.end(), EvalCacheEntry{});  // scores belong to the old network
+  }
   void new_game();
   void clear_history();  // killers and history only (helper threads; the shared table is cleared once)
   void resize_hash(size_t mb) { tt_->resize(mb); }
@@ -70,6 +73,7 @@ class Searcher {
 
   // Static evaluation of `pos` at `ply` (network accumulators are brought up to date lazily).
   int evaluate(const Position& pos, int ply);
+  int evaluate_network(const Position& pos, int ply);
   // Called on entering every node: remembers the position for incremental accumulator updates.
   void enter(const Position& pos, int ply) {
     if (net_ && ply < ACC_STACK) {
@@ -83,6 +87,15 @@ class Searcher {
   std::vector<nnue::Accumulator> acc_ = std::vector<nnue::Accumulator>(ACC_STACK);
   const Position* pos_at_[ACC_STACK] = {};
   bool acc_valid_[ACC_STACK] = {};
+  // Network evaluations by position hash: transpositions and repeated quiescence visits re-evaluate the
+  // same positions, so a hit skips both the accumulator update and the network.
+  struct EvalCacheEntry {
+    U64 key = 0;
+    int32_t score = 0;
+    int32_t valid = 0;
+  };
+  static constexpr size_t EVAL_CACHE_SIZE = size_t(1) << 18;  // 4 MB per searcher
+  std::vector<EvalCacheEntry> eval_cache_ = std::vector<EvalCacheEntry>(EVAL_CACHE_SIZE);
   int eval_stack_[ACC_STACK] = {};  // static eval per ply on the current path (-INF when in check)
 
   std::unique_ptr<TT> own_tt_;
