@@ -423,6 +423,12 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
     if (!pv_node && !in_check && depth <= 3 && searched > 0 && quiet && !gives_check &&
         static_eval + 100 + 100 * depth <= alpha)
       continue;
+    if (!pv_node && !in_check && searched > 0 && alpha > -MATE_BOUND && !gives_check && depth <= 8) {
+      // Late-move pruning: with good ordering, quiet moves this far down the list almost never matter.
+      if (quiet && searched >= (3 + depth * depth) / (2 - improving)) continue;
+      // SEE pruning: moves that lose material on the exchange, by more than the depth can make up for.
+      if (see(pos, m) < (quiet ? -60 * depth : -100 * depth)) continue;
+    }
 
     stack_.push_back(next.hash);
     move_stack_[ply] = m;
