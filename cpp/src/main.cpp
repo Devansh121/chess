@@ -15,6 +15,7 @@
 #include "movegen.h"
 #include "nnue.h"
 #include "search.h"
+#include "tune.h"
 
 namespace {
 
@@ -154,6 +155,9 @@ int main(int argc, char** argv) {
       send("option name Hash type spin default 64 min 1 max 4096");
       send("option name EvalFile type string default <embedded>");
       send("option name Threads type spin default 1 min 1 max 256");
+      for (const auto& p : tune::params)
+        send("option name " + std::string(p.name) + " type spin default " + std::to_string(p.def) + " min " +
+             std::to_string(p.lo) + " max " + std::to_string(p.hi));
       send("uciok");
     } else if (cmd == "isready") {
       send("readyok");
@@ -162,7 +166,16 @@ int main(int argc, char** argv) {
       in >> tok;  // "name"
       while (in >> tok && tok != "value") name += (name.empty() ? "" : " ") + tok;
       in >> value;
-      if (name == "Threads" && !value.empty()) {
+      bool tuned = false;
+      for (const auto& p : tune::params)
+        if (name == p.name && !value.empty()) {
+          stop_search();
+          *p.value = std::clamp(std::stoi(value), p.lo, p.hi);
+          init_lmr_table();
+          tuned = true;
+        }
+      if (tuned) {
+      } else if (name == "Threads" && !value.empty()) {
         stop_search();
         set_threads(std::clamp(std::stoi(value), 1, 256));
       } else if (name == "Hash" && !value.empty()) {

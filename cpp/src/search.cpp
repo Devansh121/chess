@@ -8,6 +8,7 @@
 #include "eval.h"
 #include "movegen.h"
 #include "see.h"
+#include "tune.h"
 
 namespace {
 
@@ -27,11 +28,18 @@ int mvv_lva(const Position& pos, Move m) {
 // Late-move reduction in plies, by remaining depth and number of moves already searched.
 int lmr_table[64][64];
 struct LmrInit {
-  LmrInit() {
-    for (int d = 1; d < 64; d++)
-      for (int m = 1; m < 64; m++) lmr_table[d][m] = int(0.75 + std::log(d) * std::log(m) / 2.25);
-  }
+  LmrInit() { init_lmr_table(); }
 } lmr_init;
+
+}  // namespace
+
+void init_lmr_table() {
+  for (int d = 1; d < 64; d++)
+    for (int m = 1; m < 64; m++)
+      lmr_table[d][m] = int(tune::LmrBase / 100.0 + std::log(d) * std::log(m) / (tune::LmrDiv / 100.0));
+}
+
+namespace {
 
 // Mate scores are stored relative to the node so they stay correct when reached by another path.
 int to_tt(int score, int ply) { return score > MATE_BOUND ? score + ply : score < -MATE_BOUND ? score - ply : score; }
@@ -384,7 +392,7 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
 
   // Razoring: far below alpha near the leaves, check with a quiescence search whether any capture can
   // close the gap; if not, the node fails low without a full search.
-  if (!pv_node && !in_check && depth <= 3 && static_eval + 250 * depth <= alpha && std::abs(alpha) < MATE_BOUND) {
+  if (!pv_node && !in_check && depth <= 3 && static_eval + tune::RazorMargin * depth <= alpha && std::abs(alpha) < MATE_BOUND) {
     int q = quiesce(pos, alpha - 1, alpha, ply);
     if (aborted_) return 0;
     if (q < alpha) return q;
@@ -392,12 +400,12 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
 
   // Reverse futility pruning: close to the leaves, if the static eval beats beta by a margin that
   // grows with the remaining depth, the opponent is unlikely to recover in so few moves.
-  if (!pv_node && !in_check && depth <= 6 && std::abs(beta) < MATE_BOUND && static_eval - 80 * (depth - improving) >= beta)
+  if (!pv_node && !in_check && depth <= 6 && std::abs(beta) < MATE_BOUND && static_eval - tune::RfpMargin * (depth - improving) >= beta)
     return static_eval;
 
   if (allow_null && !pv_node && depth >= 3 && !in_check && pos.has_non_pawn_material(pos.side) &&
       static_eval >= beta) {
-    int r = 3 + depth / 3 + std::min((static_eval - beta) / 200, 3);  // further above beta: reduce more
+    int r = 3 + depth / 3 + std::min((static_eval - beta) / tune::NmpEvalDiv, 3);  // further above beta: reduce more
     Position next = pos.make_null();
     stack_.push_back(next.hash);
     move_stack_[ply] = NO_MOVE;
@@ -429,13 +437,13 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
     // Futility pruning: near the leaves, a quiet move that can't lift the static eval to alpha even
     // with a generous margin is skipped. The first move is always searched.
     if (!pv_node && !in_check && depth <= 3 && searched > 0 && quiet && !gives_check &&
-        static_eval + 100 + 100 * depth <= alpha)
+        static_eval + tune::FutBase + tune::FutMul * depth <= alpha)
       continue;
     if (!pv_node && !in_check && searched > 0 && alpha > -MATE_BOUND && !gives_check && depth <= 8) {
       // Late-move pruning: with good ordering, quiet moves this far down the list almost never matter.
-      if (quiet && searched >= (3 + depth * depth) / (2 - improving)) continue;
+      if (quiet && searched >= (tune::LmpBase + depth * depth) / (2 - improving)) continue;
       // SEE pruning: moves that lose material on the exchange, by more than the depth can make up for.
-      if (see(pos, m) < (quiet ? -60 * depth : -100 * depth)) continue;
+      if (see(pos, m) < (quiet ? -tune::SeeQuiet * depth : -tune::SeeCapture * depth)) continue;
     }
 
     stack_.push_back(next.hash);
@@ -464,7 +472,7 @@ int Searcher::negamax(const Position& pos, int depth, int alpha, int beta, int p
           killers_[ply][0] = m;
         }
         if (prev != NO_MOVE) countermoves_[pos.board[move_to(prev)]][move_to(prev)] = m;
-        int bonus = std::min(depth * depth, 400);
+        int bonus = std::min(depth * depth, tune::HistBonusMax);
         update_history(pos.side, m, bonus);
         for (int i = 0; i < n_quiets; i++) update_history(pos.side, quiets_tried[i], -bonus);
       }
@@ -551,7 +559,7 @@ SearchResult Searcher::search(const Position& root, const std::vector<U64>& hist
     int score;
     if (depth >= 5) {
       // Aspiration window around the previous score; widen the failing side and re-search on a miss.
-      int delta = 50;
+      int delta = tune::AspDelta;
       int a = std::max(result.score - delta, -INF), b = std::min(result.score + delta, INF);
       for (;;) {
         score = root_search(root, depth, prev, best, a, b);
