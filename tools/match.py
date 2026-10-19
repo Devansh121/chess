@@ -307,6 +307,12 @@ def main():
   ap.add_argument("--tc", default="", help="clock time control BASE+INC in seconds, e.g. 10+0.1 (overrides times)")
   args = ap.parse_args()
   openings = load_openings(args.openings)
+  if args.nodes and not args.random_plies and not args.tc and len(openings) * 2 < args.start_game + args.games:
+    # Fixed-node engines are deterministic: without random plies each opening pair just replays the same
+    # two games, so the result would rest on far fewer distinct games than it reports.
+    sys.exit(
+      f"--nodes with {len(openings)} openings repeats games after game {2 * len(openings)}; add --random-plies N"
+    )
   tc = parse_tc(args.tc)
   pgn = os.path.abspath(args.pgn) if args.pgn else None
 
