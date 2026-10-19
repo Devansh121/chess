@@ -16,6 +16,9 @@ constexpr int MATE = 30000;
 constexpr int MATE_BOUND = MATE - 1000;  // above this: a forced mate
 constexpr int INF = MATE + 1;
 
+// Rebuilds the late-move reduction table from tune::LmrBase and tune::LmrDiv.
+void init_lmr_table();
+
 struct SearchLimits {
   int depth = 64;
   double time_ms = 0;  // hard limit, never exceeded; 0 = no time limit
