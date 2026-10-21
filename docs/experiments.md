@@ -94,3 +94,18 @@ At 150M positions the buckets mainly fit the Lichess positions better and did no
 time or equal nodes. With twice the data they also fit self-play positions 9% better than v2 on the same
 data, and that shows up in games despite 6% fewer nodes/s. The Lichess-only validation loss was
 misleading here: the self-play validation sets track match results much better.
+
+## Round 5: more Lichess data (412M positions)
+
+The Lichess eval dump had ~116M positions past the 300M already used (`data/processed4`). Same recipe as
+v3h384-300m (v3, 384 wide, 10 epochs from scratch, cosine LR).
+
+| Name | Training | Lichess val | Self-play 2b val | Self-play 3 val | Match |
+|---|---|---|---|---|---|
+| **v3h384-300m (default)** | ~297M Lichess | 0.02235 | **0.01304** | **0.01280** | |
+| v3h384-415m-r | 7 epochs, killed by a reboot, then 3 more via `--init` (fresh Adam, new LR schedule) | 0.02219 | 0.01393 | 0.01375 | -33 ± 22 vs default (800 games, 100k nodes) |
+| v3h384-415m-b | 10 epochs, resumed with `--resume` (exact continuation) | **0.02207** | 0.01321 (best epoch) | 0.01289 (best epoch) | not played |
+
+The extra data improves the Lichess validation loss but not the self-play ones, which are what tracks
+match results. Restarting the schedule with `--init` cost about 7% on self-play val; `--resume` (#69)
+avoids that. More Lichess positions of this kind are not the next lever.

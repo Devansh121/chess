@@ -106,6 +106,12 @@ def main():
   ap.add_argument("--seed", type=int, default=0)
   ap.add_argument("--arch", choices=sorted(ARCHS), default="v1")
   ap.add_argument("--hidden1", type=int, default=256, help="first-layer width (the C++ engine supports up to 512)")
+  ap.add_argument(
+    "--resume", action="store_true", help="continue from OUT/NAME.ckpt (written after every epoch) where it stopped"
+  )
+  ap.add_argument(
+    "--val-extra", action="append", default=[], help="another shard directory whose val_*.npz is reported per epoch"
+  )
   args = ap.parse_args()
   args.data = args.data or ["data/processed"]
 
@@ -134,8 +140,20 @@ def main():
   log = {"args": vars(args), "device": device, "params": sum(p.numel() for p in model.parameters()), "epochs": []}
   print(f"{log['params']:,} params on {device}; {len(train_shards)} train shards, {len(val_shards)} val", flush=True)
 
-  best = float("inf")
-  for epoch in range(args.epochs):
+  best, first_epoch = float("inf"), 0
+  ckpt_path = os.path.join(args.out, f"{args.name}.ckpt")
+  if args.resume and os.path.exists(ckpt_path):
+    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+    model.load_state_dict(ckpt["model"])
+    opt.load_state_dict(ckpt["opt"])
+    sched.load_state_dict(ckpt["sched"])
+    best, first_epoch, log = ckpt["best"], ckpt["epoch"], ckpt["log"]
+    random.setstate(ckpt["py_rng"])
+    np.random.set_state(ckpt["np_rng"])
+    torch.set_rng_state(ckpt["torch_rng"].cpu())
+    print(f"resumed after epoch {first_epoch}", flush=True)
+  extra_val = {d: sorted(glob.glob(os.path.join(d, "val_*.npz"))) for d in args.val_extra}
+  for epoch in range(first_epoch, args.epochs):
     start, total, count = time.time(), 0.0, 0
     for x, y, w in batches(
       train_shards, args.decided, args.batch_size, args.positions, device, shuffle=True, cp_scale=args.cp_scale
@@ -149,12 +167,21 @@ def main():
     sched.step()
     val = evaluate(model, val_shards, device, args.batch_size, args.cp_scale)
     secs = time.time() - start
+    extra = {d: evaluate(model, shards, device, args.batch_size, args.cp_scale) for d, shards in extra_val.items()}
     log["epochs"].append(
-      {"epoch": epoch + 1, "train_mse": total / count, "val_mse": val, "positions": count, "secs": secs}
+      {
+        "epoch": epoch + 1,
+        "train_mse": total / count,
+        "val_mse": val,
+        "extra_val_mse": extra,
+        "positions": count,
+        "secs": secs,
+      }
     )
     print(
       f"epoch {epoch + 1}/{args.epochs}: train {total / count:.5f}  val {val:.5f}  "
-      f"{count:,} positions in {secs:.0f}s ({count / secs:,.0f}/s)",
+      + "".join(f"{os.path.basename(d)} {v:.5f}  " for d, v in extra.items())
+      + f"{count:,} positions in {secs:.0f}s ({count / secs:,.0f}/s)",
       flush=True,
     )
     if val < best:
@@ -163,6 +190,19 @@ def main():
     log["best_val_mse"] = best
     with open(os.path.join(args.out, f"{args.name}.json"), "w") as f:
       json.dump(log, f, indent=2)
+    state = {
+      "model": model.state_dict(),
+      "opt": opt.state_dict(),
+      "sched": sched.state_dict(),
+      "epoch": epoch + 1,
+      "best": best,
+      "log": log,
+      "py_rng": random.getstate(),
+      "np_rng": np.random.get_state(),
+      "torch_rng": torch.get_rng_state(),
+    }
+    torch.save(state, ckpt_path + ".tmp")
+    os.replace(ckpt_path + ".tmp", ckpt_path)
 
 
 if __name__ == "__main__":
