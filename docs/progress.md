@@ -21,6 +21,9 @@ longer time controls, so treat absolute numbers as approximate and comparisons a
 | + int8 network kernel (#38) | vs Stockfish 2800 / 3000, 160 each | +23 =57 -80 (-129 ± 45) / +5 =46 -109 (-269 ± 51) | ~2670 / ~2730, **~2700** |
 | + counter moves (#44), eval cache (#53), neutral experiments reverted (#55) | vs Stockfish 2800 / 3000, 160 each | +42 =53 -65 (-50 ± 45) / +3 =45 -112 (-289 ± 52) | ~2750 / ~2710, **~2730** |
 | + 384-wide network as default (#58; +50 ± 22 vs the 256-wide net over 800 games) | vs Stockfish 2800 / 3000, 160 each | +42 =53 -65 (-50 ± 45) / +9 =52 -99 (-221 ± 48) | ~2750 / ~2780, **~2765** |
+| + PGO build (#63), king-bucketed network (#64), LMP/SEE pruning (#65), null-move/razoring (#67) | vs Stockfish 3000, 160 games | +16 =71 -73 (-129 ± 41) | **~2870** |
+| + SPSA-tuned search margins (#68) | vs Stockfish 3000, 320 games | +40 =125 -155 (-131 ± 30) | **~2869** |
+| + network trained with own self-play data (#70; +69 ± 22 vs #64's net) | vs Stockfish 3000, 320 games | +48 =155 -117 (-76 ± 27) | **~2924** |
 
 ## Search changes (C++)
 

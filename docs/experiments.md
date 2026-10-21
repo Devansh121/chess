@@ -109,3 +109,22 @@ v3h384-300m (v3, 384 wide, 10 epochs from scratch, cosine LR).
 The extra data improves the Lichess validation loss but not the self-play ones, which are what tracks
 match results. Restarting the schedule with `--init` cost about 7% on self-play val; `--resume` (#69)
 avoids that. More Lichess positions of this kind are not the next lever.
+
+## Round 6: own-engine self-play data with result blending
+
+`chess-engine datagen` with the #68 engine (PGO, v3h384-300m): 6 processes, 5k nodes per move, 40 openings
++ 4 random plies, ~14.6M quiet positions (stopped early by a full disk). Each target is
+`0.7 * p(own search score) + 0.3 * game result` (`build_dataset.py --wdl 0.3`), with no Stockfish labelling.
+Training: v3, 384 wide, 10 epochs from scratch on the 300M Lichess positions plus the self-play shards x4
+(~16% of each epoch).
+
+| Name | Lichess val | Self-play 2b val | Self-play 3 val | Match |
+|---|---|---|---|---|
+| v3h384-300m (#64 default) | **0.02235** | 0.01304 | 0.01280 | |
+| v3h384-300m-sp4, epoch 9 | 0.02291 | 0.01289 | 0.01227 | |
+| **v3h384-300m-sp4, epoch 10** | 0.02345 | **0.01172** | **0.01110** | **+69 ± 22** vs #64's net (800 games, 100k nodes) |
+
+The Lichess loss got worse while the self-play ones improved by 10-13%, and the match followed the self-play
+sets. Earlier self-play rounds used a few million Stockfish depth-10 to 14 labels; many more positions scored
+by the engine's own search, blended with the result, worked much better. The Lichess-best checkpoint
+(`NAME.pt`) would have been epoch 8, so the last epoch was taken from `NAME.ckpt`.
