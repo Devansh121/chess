@@ -1,0 +1,154 @@
+{
+  "args": {
+    "name": "v3h384-300m-sp4",
+    "data": [
+      "data/processed",
+      "data/processed2",
+      "data/processed3",
+      "data/processed-sp4:4"
+    ],
+    "init": null,
+    "out": "nets",
+    "shards": 0,
+    "positions": 0,
+    "epochs": 10,
+    "batch_size": 16384,
+    "lr": 0.001,
+    "decided": "keep",
+    "cp_scale": 400.0,
+    "seed": 0,
+    "arch": "v3",
+    "hidden1": 384,
+    "resume": true,
+    "val_extra": [
+      "data/processed-sp2b",
+      "data/processed-sp3",
+      "data/processed-sp4"
+    ]
+  },
+  "device": "cuda",
+  "params": 1500353,
+  "epochs": [
+    {
+      "epoch": 1,
+      "train_mse": 0.02519638037965401,
+      "val_mse": 0.026646014535760515,
+      "extra_val_mse": {
+        "data/processed-sp2b": 0.016303454758752813,
+        "data/processed-sp3": 0.015903915996067674,
+        "data/processed-sp4": 0.013485893264606284
+      },
+      "positions": 354955566,
+      "secs": 895.1653838157654
+    },
+    {
+      "epoch": 2,
+      "train_mse": 0.02284805522747764,
+      "val_mse": 0.025594180527803097,
+      "extra_val_mse": {
+        "data/processed-sp2b": 0.016118026790371734,
+        "data/processed-sp3": 0.015425510177306721,
+        "data/processed-sp4": 0.013167668725251803
+      },
+      "positions": 354955566,
+      "secs": 866.9854185581207
+    },
+    {
+      "epoch": 3,
+      "train_mse": 0.02223507118813237,
+      "val_mse": 0.024934110366961273,
+      "extra_val_mse": {
+        "data/processed-sp2b": 0.015440307657403944,
+        "data/processed-sp3": 0.014849521448519901,
+        "data/processed-sp4": 0.012448969313517123
+      },
+      "positions": 354955566,
+      "secs": 842.2335495948792
+    },
+    {
+      "epoch": 4,
+      "train_mse": 0.021817889488520033,
+      "val_mse": 0.02490338586662738,
+      "extra_val_mse": {
+        "data/processed-sp2b": 0.013684987236373167,
+        "data/processed-sp3": 0.013455987241886751,
+        "data/processed-sp4": 0.011837114000430986
+      },
+      "positions": 354955566,
+      "secs": 845.7395942211151
+    },
+    {
+      "epoch": 5,
+      "train_mse": 0.021461430121236278,
+      "val_mse": 0.024417688032167553,
+      "extra_val_mse": {
+        "data/processed-sp2b": 0.013276745088017173,
+        "data/processed-sp3": 0.012950211352223972,
+        "data/processed-sp4": 0.01148043162338877
+      },
+      "positions": 354955566,
+      "secs": 860.8699924945831
+    },
+    {
+      "epoch": 6,
+      "train_mse": 0.021174247396762935,
+      "val_mse": 0.023754281975331724,
+      "extra_val_mse": {
+        "data/processed-sp2b": 0.013755460689284108,
+        "data/processed-sp3": 0.013221346010989914,
+        "data/processed-sp4": 0.011295511902120635
+      },
+      "positions": 354955566,
+      "secs": 809.7843956947327
+    },
+    {
+      "epoch": 7,
+      "train_mse": 0.020921816805605786,
+      "val_mse": 0.02346454292037841,
+      "extra_val_mse": {
+        "data/processed-sp2b": 0.01369685276298766,
+        "data/processed-sp3": 0.013221684699064899,
+        "data/processed-sp4": 0.011311387441596007
+      },
+      "positions": 354955566,
+      "secs": 833.4722497463226
+    },
+    {
+      "epoch": 8,
+      "train_mse": 0.0207027215746531,
+      "val_mse": 0.022838656082667726,
+      "extra_val_mse": {
+        "data/processed-sp2b": 0.013816089491882927,
+        "data/processed-sp3": 0.012915960565693494,
+        "data/processed-sp4": 0.011092871266045893
+      },
+      "positions": 354955566,
+      "secs": 809.2885029315948
+    },
+    {
+      "epoch": 9,
+      "train_mse": 0.02057871816057566,
+      "val_mse": 0.022909942797323755,
+      "extra_val_mse": {
+        "data/processed-sp2b": 0.012890235738337447,
+        "data/processed-sp3": 0.012273086459571965,
+        "data/processed-sp4": 0.010359294112223732
+      },
+      "positions": 354955566,
+      "secs": 861.696284532547
+    },
+    {
+      "epoch": 10,
+      "train_mse": 0.020513352229627014,
+      "val_mse": 0.023450419732114338,
+      "extra_val_mse": {
+        "data/processed-sp2b": 0.01172462997922472,
+        "data/processed-sp3": 0.011095075008865987,
+        "data/processed-sp4": 0.009396521611993473
+      },
+      "positions": 354955566,
+      "secs": 814.5308096408844
+    }
+  ],
+  "best_val_mse": 0.022838656082667726
+}
