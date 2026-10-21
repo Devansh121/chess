@@ -101,3 +101,8 @@ def test_convert_row_datagen_blends_score_and_result(monkeypatch):
   assert cp == -120
   assert y == pytest.approx(0.75 * win_probability(cp=-120) + 0.25)
   assert build_dataset.convert_row(f"{fen}\t120\t\n") is None  # cut-off last line
+
+
+def test_convert_row_datagen_rejects_two_kings():
+  spliced = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNK w - - 0 1"
+  assert build_dataset.convert_row(f"{spliced}\t10\t0.5\n") is None

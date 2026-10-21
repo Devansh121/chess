@@ -48,7 +48,8 @@ def convert_row(line):
     r = float(result) if white else 1.0 - float(result)
     y = (1.0 - WDL) * win_probability(cp=c) + WDL * r
     indices = fen_features(fen)
-    if len(indices) > MAX_PIECES:
+    # One king per side: a line spliced from two cut-off ones can parse into an impossible position.
+    if len(indices) > MAX_PIECES or sum(i // 64 == 5 for i in indices) != 1 or sum(i // 64 == 11 for i in indices) != 1:
       return None
     is_val = zlib.crc32(fen.encode()) % 100 < VAL_PERCENT
     return is_val, indices, y, max(-CP_CLIP, min(CP_CLIP, c))
