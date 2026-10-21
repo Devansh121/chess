@@ -39,6 +39,8 @@ def convert_row(line):
   (fen, cp, mate, depth) or `chess-engine datagen` output (fen, cp, result); cp/mate/result from White's view.
   For datagen rows the target blends the search score with the game result: (1 - WDL) * p(cp) + WDL * result."""
   fields = line.rstrip("\n").split("\t")
+  if len(fields) not in (3, 4):  # a line cut off mid-write
+    return None
   if len(fields) == 3:
     fen, cp, result = fields
     if not cp or not result:  # a line cut short while the file was being written

@@ -106,3 +106,7 @@ def test_convert_row_datagen_blends_score_and_result(monkeypatch):
 def test_convert_row_datagen_rejects_two_kings():
   spliced = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNK w - - 0 1"
   assert build_dataset.convert_row(f"{spliced}\t10\t0.5\n") is None
+
+
+def test_convert_row_skips_truncated_lines():
+  assert build_dataset.convert_row("rnbqkbnr/pppppppp/8\n") is None
