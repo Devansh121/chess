@@ -88,3 +88,16 @@ def test_end_to_end_small_file(tmp_path):
     assert ((d["x"] < 768) | (d["x"] == PAD)).all()
     total += len(d["y"])
   assert total == 200
+
+
+def test_convert_row_datagen_blends_score_and_result(monkeypatch):
+  monkeypatch.setattr(build_dataset, "WDL", 0.25)
+  fen = FENS[1]  # White to move
+  _, _, y, cp = build_dataset.convert_row(f"{fen}\t120\t0.0\n")
+  assert cp == 120
+  assert y == pytest.approx(0.75 * win_probability(cp=120))
+  black = FENS[2]  # Black to move: score and result flip to Black's view
+  _, _, y, cp = build_dataset.convert_row(f"{black}\t120\t0.0\n")
+  assert cp == -120
+  assert y == pytest.approx(0.75 * win_probability(cp=-120) + 0.25)
+  assert build_dataset.convert_row(f"{fen}\t120\t\n") is None  # cut-off last line

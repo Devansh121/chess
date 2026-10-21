@@ -9,6 +9,9 @@ Each shard data/processed/{train,val}_NNN.npz holds up to SHARD_SIZE positions:
 About 1% of positions go to validation, chosen by a hash of the FEN so the split is stable.
 
 usage: scripts/build_dataset.py [--input data/evals.tsv.zst] [--out data/processed] [--limit N] [--workers N]
+       [--wdl LAMBDA]
+
+The input may also be plain or compressed `chess-engine datagen` output (fen, score, result per row).
 """
 
 import argparse
@@ -28,9 +31,28 @@ BATCH = 50_000
 VAL_PERCENT = 1
 
 
+WDL = 0.0  # set by --wdl: weight of the game result in the target (self-play rows only)
+
+
 def convert_row(line):
-  """One TSV row (fen, cp, mate, depth; cp/mate from White's view) -> (is_val, indices, y, cp_stm), or None."""
-  fen, cp, mate, _depth = line.rstrip("\n").split("\t")
+  """One TSV row -> (is_val, indices, y, cp_stm), or None. Rows are either Lichess/Stockfish evaluations
+  (fen, cp, mate, depth) or `chess-engine datagen` output (fen, cp, result); cp/mate/result from White's view.
+  For datagen rows the target blends the search score with the game result: (1 - WDL) * p(cp) + WDL * result."""
+  fields = line.rstrip("\n").split("\t")
+  if len(fields) == 3:
+    fen, cp, result = fields
+    if not cp or not result:  # a line cut short while the file was being written
+      return None
+    white = fen.split()[1] == "w"
+    c = int(cp) * (1 if white else -1)
+    r = float(result) if white else 1.0 - float(result)
+    y = (1.0 - WDL) * win_probability(cp=c) + WDL * r
+    indices = fen_features(fen)
+    if len(indices) > MAX_PIECES:
+      return None
+    is_val = zlib.crc32(fen.encode()) % 100 < VAL_PERCENT
+    return is_val, indices, y, max(-CP_CLIP, min(CP_CLIP, c))
+  fen, cp, mate, _depth = fields
   white = fen.split()[1] == "w"
   sign = 1 if white else -1
   if mate:
@@ -46,6 +68,11 @@ def convert_row(line):
     return None
   is_val = zlib.crc32(fen.encode()) % 100 < VAL_PERCENT
   return is_val, indices, y, cp_stm
+
+
+def _init(wdl):
+  global WDL
+  WDL = wdl
 
 
 def convert_batch(lines):
@@ -68,7 +95,7 @@ def convert_batch(lines):
 
 
 def batches(path, limit):
-  proc = subprocess.Popen(["zstd", "-dc", path], stdout=subprocess.PIPE, text=True, bufsize=1 << 20)
+  proc = subprocess.Popen(["zstd", "-dcf", path], stdout=subprocess.PIPE, text=True, bufsize=1 << 20)
   batch, n = [], 0
   for line in proc.stdout:
     batch.append(line)
@@ -114,13 +141,14 @@ def main():
   ap.add_argument("--input", default="data/evals.tsv.zst")
   ap.add_argument("--out", default="data/processed")
   ap.add_argument("--limit", type=int, default=0, help="stop after this many input rows (0 = all)")
+  ap.add_argument("--wdl", type=float, default=0.0, help="game-result weight in the target, datagen rows only")
   ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 2))
   args = ap.parse_args()
   os.makedirs(args.out, exist_ok=True)
 
   train, val = ShardWriter(args.out, "train"), ShardWriter(args.out, "val")
   done = 0
-  with Pool(args.workers) as pool:
+  with Pool(args.workers, initializer=_init, initargs=(args.wdl,)) as pool:
     for result in pool.imap(convert_batch, batches(args.input, args.limit), chunksize=1):
       train.add(*result[False])
       val.add(*result[True])
