@@ -31,20 +31,22 @@ std::string write_random_net(int arch, int h1, int h2) {
     s ^= s << 17;
     return scale * (float(s % 20001) / 10000.0f - 1.0f);
   };
-  // arch 3: the same 4-bucket map as nn/model.py KING_BUCKETS.
-  uint32_t buckets = arch == 3 ? 4 : 1;
+  // arch 3 and 4: the same 4-bucket map as nn/model.py KING_BUCKETS; arch 4 adds 8 output buckets.
+  uint32_t buckets = arch >= 3 ? 4 : 1;
+  uint32_t output_buckets = arch == 4 ? 8 : 1;
   uint8_t map[64] = {};
   for (int sq = 0; sq < 64; sq++) map[sq] = sq < 8 ? (file_of(sq) < 2 ? 0 : 1) : sq < 16 ? 2 : 3;
-  uint32_t header[5] = {arch == 3 ? 2u : 1u, uint32_t(arch), uint32_t(buckets * nnue::NUM_FEATURES + 1),
+  uint32_t header[5] = {arch == 4 ? 3u : arch == 3 ? 2u : 1u, uint32_t(arch), uint32_t(buckets * nnue::NUM_FEATURES + 1),
                         uint32_t(h1), uint32_t(h2)};
   float cp_scale = 400.0f;
   out.write("CHNN", 4);
   out.write(reinterpret_cast<char*>(header), sizeof(header));
   out.write(reinterpret_cast<char*>(&cp_scale), sizeof(cp_scale));
-  if (arch == 3) {
+  if (arch >= 3) {
     out.write(reinterpret_cast<char*>(&buckets), sizeof(buckets));
     out.write(reinterpret_cast<char*>(map), sizeof(map));
   }
+  if (arch == 4) out.write(reinterpret_cast<char*>(&output_buckets), sizeof(output_buckets));
   auto put = [&](size_t n, float scale) {
     for (size_t i = 0; i < n; i++) {
       float v = rnd(scale);
@@ -53,10 +55,10 @@ std::string write_random_net(int arch, int h1, int h2) {
   };
   put(size_t(buckets * nnue::NUM_FEATURES + 1) * h1, 0.05f);  // w1
   put(h1, 0.1f);                                              // b1
-  put(size_t(h2) * (arch == 1 ? 1 : 2) * h1, 0.1f);           // w2
-  put(h2, 0.1f);                                    // b2
-  put(h2, 0.5f);                                    // w3
-  put(1, 0.1f);                                     // b3
+  put(output_buckets * h2 * (arch == 1 ? 1 : 2) * h1, 0.1f);  // w2
+  put(output_buckets * h2, 0.1f);                             // b2
+  put(output_buckets * h2, 0.5f);                             // w3
+  put(output_buckets, 0.1f);                                  // b3
   return path;
 }
 
@@ -78,7 +80,7 @@ int walk(const nnue::Network& net, const Position& pos, const nnue::Accumulator&
   int worst = max_diff(net, acc, fresh);
   nnue::FloatAccumulator ref;
   nnue::refresh_float(net, pos, ref);
-  worst_quant = std::max(worst_quant, std::fabs(nnue::logit(net, acc, pos.side) - nnue::logit_float(net, ref, pos.side)));
+  worst_quant = std::max(worst_quant, std::fabs(nnue::logit(net, acc, pos.side, popcount(pos.all())) - nnue::logit_float(net, ref, pos.side, popcount(pos.all()))));
   nodes++;
   if (depth == 0) return worst;
   MoveList list;
@@ -116,7 +118,7 @@ int main() {
       "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",                             // en passant
       "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",      // promotions
   };
-  for (int arch = 1; arch <= 3; arch++) {
+  for (int arch = 1; arch <= 4; arch++) {
     nnue::Network net;
     std::string err = net.load(write_random_net(arch, 64, 16));
     check(err.empty(), "load arch " + std::to_string(arch) + (err.empty() ? "" : ": " + err));
@@ -143,7 +145,7 @@ int main() {
       Position flipped = colour_flipped(pos);
       nnue::Accumulator a2;
       nnue::refresh(net, flipped, a2);
-      float l1 = nnue::logit(net, acc, pos.side), l2 = nnue::logit(net, a2, flipped.side);
+      float l1 = nnue::logit(net, acc, pos.side, popcount(pos.all())), l2 = nnue::logit(net, a2, flipped.side, popcount(flipped.all()));
       check(std::fabs(l1 - l2) < 1e-4f, "arch " + std::to_string(arch) + " colour-flipped position scores the same");
     }
   }
@@ -160,7 +162,7 @@ int main() {
         p.set_fen(fen);
         nnue::Accumulator acc;
         nnue::refresh(net, p, acc);
-        return nnue::evaluate(net, acc, p.side);
+        return nnue::evaluate(net, acc, p.side, popcount(p.all()));
       };
       int start = eval("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
       int queen_up = eval("4k3/8/8/8/8/8/8/3QK3 w - - 0 1");

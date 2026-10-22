@@ -192,3 +192,46 @@ def test_v3_export_matches_the_cpp_engine(tmp_path):
     want = model(x).tolist()
   assert len(cpp) == len(want)
   assert np.allclose(cpp, want, atol=1e-4), (cpp, want)
+
+
+V4_FENS = [fen for fen, _ in V3_FENS] + [
+  "8/8/4k3/8/8/3K4/8/8 w - - 0 1",  # 2 pieces: output bucket 0
+  "8/5pk1/8/8/2R5/8/5PK1/8 b - - 0 1",  # 5 pieces
+  "r4rk1/pp3ppp/8/8/8/8/PP3PPP/R4RK1 w - - 0 1",  # 16 pieces
+]
+
+
+def test_v4_output_buckets_follow_piece_count():
+  from nn.model import output_bucket
+
+  x = to_model_input(np.array([pack(fen_features(f)) for f in V4_FENS]))
+  pieces = [len(fen_features(f)) for f in V4_FENS]
+  assert output_bucket(x).tolist() == [min((p - 2) * 8 // 32, 7) for p in pieces]
+  assert output_bucket(x)[len(V3_FENS)].item() == 0
+
+
+@pytest.mark.skipif(not os.path.exists(ENGINE), reason="C++ engine not built")
+def test_v4_export_matches_the_cpp_engine(tmp_path):
+  # Same as the v3 check, with output buckets: positions with different piece counts use different heads.
+  from nn.model import ValueNetV4
+
+  torch.manual_seed(0)
+  model = ValueNetV4(hidden1=32)
+  with torch.no_grad():
+    model.inputs.weight.normal_(std=0.02)
+    model.inputs.weight[-1].zero_()
+  torch.save(model.state_dict(), tmp_path / "v4.pt")
+  (tmp_path / "v4.json").write_text(json.dumps({"args": {"arch": "v4", "hidden1": 32, "cp_scale": 400.0}}))
+  net = tmp_path / "v4.nnue"
+  subprocess.run([sys.executable, os.path.join(REPO, "scripts", "export_net.py"), tmp_path / "v4.pt", net], check=True)
+
+  commands = [f"setoption name EvalFile value {net}"]
+  for fen in V4_FENS:
+    commands += [f"position fen {fen}", "eval"]
+  out = subprocess.run([ENGINE], input="\n".join(commands + ["quit"]), capture_output=True, text=True, check=True)
+  cpp = [float(line.split(" float ")[1]) for line in out.stdout.splitlines() if " float " in line]
+  x = to_model_input(np.array([pack(fen_features(f)) for f in V4_FENS]))
+  with torch.no_grad():
+    want = model(x).tolist()
+  assert len(cpp) == len(want)
+  assert np.allclose(cpp, want, atol=1e-4), (cpp, want)

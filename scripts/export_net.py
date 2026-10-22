@@ -10,6 +10,9 @@ OUT.npz is read by the Python engine; OUT.nnue is the binary format for the C++ 
 arch 3 (king buckets, nn/model.py ValueNetV3) is version 2: after cp_scale come u32 num_buckets and
   u8 bucket[64] (by own-king square in the mirrored view), and w1 has num_buckets * 768 + 1 rows with the
   factoriser already added to every bucket.
+arch 4 (v3 + output buckets, ValueNetV4) is version 3: the arch 3 header plus u32 output_buckets, then
+  w2[output_buckets][hidden2][2 * hidden1], b2[output_buckets][hidden2], w3[output_buckets][hidden2],
+  b3[output_buckets]; the engine picks the bucket from the piece count, (pieces - 2) * output_buckets / 32.
 
 The training scale (--cp-scale, from nets/NAME.json) is stored with the weights, so the engine converts
 the network's logit back to centipawns with the same constant.
@@ -24,12 +27,12 @@ import numpy as np
 import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from nn.model import KING_BUCKETS, NUM_BUCKETS, ValueNetV3  # noqa: E402
+from nn.model import KING_BUCKETS, NUM_BUCKETS, OUTPUT_BUCKETS, ValueNetV3, ValueNetV4  # noqa: E402
 
 
 def write_binary(path, sd, arch, cp_scale, hidden1):
-  if arch == 3:
-    model = ValueNetV3(hidden1=hidden1)
+  if arch >= 3:
+    model = (ValueNetV3 if arch == 3 else ValueNetV4)(hidden1=hidden1)
     model.load_state_dict(sd)
     w1 = model.folded_input_weights().numpy().astype("<f4")
     w1[-1] = 0  # padding row
@@ -44,22 +47,29 @@ def write_binary(path, sd, arch, cp_scale, hidden1):
     print(f"clamped {clipped} of {w1.size:,} first-layer weights to +/-{limit:.3f}", file=sys.stderr)
   w2 = sd["l2.weight"].numpy().astype("<f4")
   inputs, hidden1 = w1.shape
-  hidden2 = w2.shape[0]
+  output_buckets = OUTPUT_BUCKETS if arch == 4 else 1
+  hidden2 = w2.shape[0] // output_buckets
+  if arch == 4:
+    w3, b3 = sd["out_weight"], sd["out_bias"]
+  else:
+    w3, b3 = sd["out.weight"][0], sd["out.bias"]
   perspectives = 1 if arch == 1 else 2
   assert w2.shape[1] == perspectives * hidden1, (w2.shape, arch, hidden1)
   with open(path, "wb") as f:
     f.write(b"CHNN")
-    f.write(struct.pack("<5If", 2 if arch == 3 else 1, arch, inputs, hidden1, hidden2, cp_scale))
-    if arch == 3:
+    f.write(struct.pack("<5If", {3: 2, 4: 3}.get(arch, 1), arch, inputs, hidden1, hidden2, cp_scale))
+    if arch >= 3:
       f.write(struct.pack("<I", NUM_BUCKETS))
       f.write(bytes(KING_BUCKETS))
+    if arch == 4:
+      f.write(struct.pack("<I", output_buckets))
     for _name, arr in (
       ("w1", w1),
       ("b1", sd["input_bias"]),
       ("w2", w2),
       ("b2", sd["l2.bias"]),
-      ("w3", sd["out.weight"][0]),
-      ("b3", sd["out.bias"]),
+      ("w3", w3),
+      ("b3", b3),
     ):
       f.write(np.ascontiguousarray(np.asarray(arr, dtype="<f4")).tobytes())
 
@@ -80,8 +90,8 @@ def main():
     write_binary(out, sd, int(arch[1:]), cp_scale, hidden1)
     print(out)
     return
-  if arch == "v3":
-    sys.exit("the Python engine reads v1/v2 only; export v3 as .nnue for the C++ engine")
+  if arch in ("v3", "v4"):
+    sys.exit("the Python engine reads v1/v2 only; export v3/v4 as .nnue for the C++ engine")
   np.savez(
     out,
     w1=sd["inputs.weight"].numpy(),

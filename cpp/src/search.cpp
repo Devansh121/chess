@@ -275,7 +275,7 @@ int Searcher::evaluate_network(const Position& pos, int ply) {
   if (ply >= ACC_STACK) {
     nnue::Accumulator scratch;
     nnue::refresh(*net_, pos, scratch);
-    return nnue::evaluate(*net_, scratch, pos.side);
+    return nnue::evaluate(*net_, scratch, pos.side, popcount(pos.all()));
   }
   // Walk back to the nearest node on the current path whose accumulator is up to date, then apply the
   // move differences forward. Positions with no evaluation never pay for an update.
@@ -289,7 +289,7 @@ int Searcher::evaluate_network(const Position& pos, int ply) {
     nnue::update(*net_, *pos_at_[j - 1], *pos_at_[j], acc_[j - 1], acc_[j], &refresh_cache_);
     acc_valid_[j] = true;
   }
-  return nnue::evaluate(*net_, acc_[ply], pos.side);
+  return nnue::evaluate(*net_, acc_[ply], pos.side, popcount(pos.all()));
 }
 
 int Searcher::quiesce(const Position& pos, int alpha, int beta, int ply) {

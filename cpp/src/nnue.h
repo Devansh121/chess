@@ -11,6 +11,8 @@
 // arch 3: arch 2 with king buckets: each perspective mirrors files when its own king is on files e-h and
 //         uses one of num_buckets row sets, picked by that king's square. A king move that changes the
 //         bucket or crosses the mirror line refreshes that perspective's accumulator; the other stays incremental.
+// arch 4: arch 3 with output buckets: output_buckets copies of the hidden and output layers, one picked by
+//         the number of pieces on the board, (pieces - 2) * output_buckets / 32.
 //
 // The search uses a quantized integer version: w1/b1 scaled by QA = 127 into int16, so the clipped
 // activation range [0, 1] becomes [0, 127] and fits a uint8; w2 scaled into int8 by the largest factor
@@ -20,6 +22,7 @@
 // The float functions (refresh_float, logit_float) are the reference the tests compare against.
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -39,18 +42,22 @@ struct Network {
   int num_buckets = 1;
   bool mirror = false;              // arch 3: mirror files when the perspective's king is on files e-h
   uint8_t bucket[64] = {};          // arch 3: bucket by own-king square (perspective view, after mirroring)
+  int output_buckets = 1;           // arch 4: hidden/output layer sets, picked by piece count
+  int output_bucket(int pieces) const {
+    return std::clamp((pieces - 2) * output_buckets / 32, 0, output_buckets - 1);
+  }
   int perspectives() const { return arch == 1 ? 1 : 2; }
   float cp_per_logit = 0;
   // Float weights as trained (reference).
   std::vector<float> w1;  // [num_buckets * NUM_FEATURES + 1][hidden1]; the last row is padding (unused)
   std::vector<float> b1;  // [hidden1]
-  std::vector<float> w2;  // [hidden2][perspectives * hidden1]
-  std::vector<float> b2;  // [hidden2]
-  std::vector<float> w3;  // [hidden2]
-  float b3 = 0;
+  std::vector<float> w2;  // [output_buckets][hidden2][perspectives * hidden1]
+  std::vector<float> b2;  // [output_buckets][hidden2]
+  std::vector<float> w3;  // [output_buckets][hidden2]
+  std::vector<float> b3;  // [output_buckets]
   // Quantized copies used by the search.
   std::vector<int16_t> w1q, b1q;
-  std::vector<int8_t> w2q;  // [hidden2][perspectives * hidden1]
+  std::vector<int8_t> w2q;  // [output_buckets][hidden2][perspectives * hidden1]
   int qb = 0;               // scale of w2q, chosen per network
 
   // Loads a .nnue file written by scripts/export_net.py and quantizes it. Returns an error message,
@@ -115,12 +122,13 @@ void refresh(const Network& net, const Position& pos, Accumulator& acc);
 // A perspective whose king changed bucket is rebuilt, through `cache` when one is given.
 void update(const Network& net, const Position& parent, const Position& child, const Accumulator& parent_acc,
             Accumulator& child_acc, RefreshCache* cache = nullptr);
-float logit(const Network& net, const Accumulator& acc, int side_to_move);
+// `pieces` (kings included) picks the output bucket of arch 4 networks; other archs ignore it.
+float logit(const Network& net, const Accumulator& acc, int side_to_move, int pieces = 32);
 // Centipawns for the side to move, capped at +/-5000 to stay clear of mate scores.
-int evaluate(const Network& net, const Accumulator& acc, int side_to_move);
+int evaluate(const Network& net, const Accumulator& acc, int side_to_move, int pieces = 32);
 
 // Float reference.
 void refresh_float(const Network& net, const Position& pos, FloatAccumulator& acc);
-float logit_float(const Network& net, const FloatAccumulator& acc, int side_to_move);
+float logit_float(const Network& net, const FloatAccumulator& acc, int side_to_move, int pieces = 32);
 
 }  // namespace nnue

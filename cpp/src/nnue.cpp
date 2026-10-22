@@ -118,11 +118,12 @@ std::string Network::load_from_memory(const void* data, size_t size) {
   if (!read_raw(in, magic, 4) || std::memcmp(magic, "CHNN", 4) != 0) return "not a .nnue file";
   if (!read_raw(in, header, 5) || !read_raw(in, &cp_scale, 1)) return "truncated header";
   uint32_t version = header[0], a = header[1], inputs = header[2], h1 = header[3], h2 = header[4];
-  if (version != (a == 3 ? 2u : 1u)) return "unsupported version " + std::to_string(version);
+  if (version != (a == 4 ? 3u : a == 3 ? 2u : 1u)) return "unsupported version " + std::to_string(version);
   num_buckets = 1;
+  output_buckets = 1;
   mirror = false;
   std::memset(bucket, 0, sizeof(bucket));
-  if (a == 3) {
+  if (a >= 3) {
     uint32_t nb;
     if (!read_raw(in, &nb, 1) || !read_raw(in, bucket, 64)) return "truncated header";
     if (nb < 1 || nb > 64) return "unsupported bucket count";
@@ -131,7 +132,13 @@ std::string Network::load_from_memory(const void* data, size_t size) {
     num_buckets = int(nb);
     mirror = true;
   }
-  if (a < 1 || a > 3 || inputs != uint32_t(num_buckets * NUM_FEATURES + 1) || h1 == 0 || h1 > MAX_HIDDEN1 ||
+  if (a == 4) {
+    uint32_t ob;
+    if (!read_raw(in, &ob, 1)) return "truncated header";
+    if (ob < 1 || ob > 32) return "unsupported output bucket count";
+    output_buckets = int(ob);
+  }
+  if (a < 1 || a > 4 || inputs != uint32_t(num_buckets * NUM_FEATURES + 1) || h1 == 0 || h1 > MAX_HIDDEN1 ||
       h2 == 0)
     return "unsupported dimensions";
   arch = int(a);
@@ -140,12 +147,14 @@ std::string Network::load_from_memory(const void* data, size_t size) {
   cp_per_logit = cp_scale / std::log(10.0f);
   w1.resize(size_t(inputs) * h1);
   b1.resize(h1);
-  w2.resize(size_t(h2) * perspectives() * h1);
-  b2.resize(h2);
-  w3.resize(h2);
+  size_t ob = size_t(output_buckets);
+  w2.resize(ob * h2 * perspectives() * h1);
+  b2.resize(ob * h2);
+  w3.resize(ob * h2);
+  b3.resize(ob);
   if (!read_raw(in, w1.data(), w1.size()) || !read_raw(in, b1.data(), b1.size()) ||
       !read_raw(in, w2.data(), w2.size()) || !read_raw(in, b2.data(), b2.size()) ||
-      !read_raw(in, w3.data(), w3.size()) || !read_raw(in, &b3, 1))
+      !read_raw(in, w3.data(), w3.size()) || !read_raw(in, b3.data(), b3.size()))
     return "truncated weights";
 
   // Overflow guards: an accumulator is b1 plus at most 32 piece rows; a hidden-layer sum is at most
@@ -253,7 +262,7 @@ void update(const Network& net, const Position& parent, const Position& child, c
     }
 }
 
-float logit(const Network& net, const Accumulator& acc, int side_to_move) {
+float logit(const Network& net, const Accumulator& acc, int side_to_move, int pieces) {
   int n = net.hidden1;
   alignas(64) uint8_t h1[2 * MAX_HIDDEN1];
   clip_to_u8(acc.v[side_to_move], h1, n);
@@ -261,15 +270,18 @@ float logit(const Network& net, const Accumulator& acc, int side_to_move) {
   int width = net.perspectives() * n;
   alignas(64) int32_t sums[256];
   int h2 = std::min(net.hidden2, 256);
-  hidden_layer(h1, net.w2q.data(), width, h2, sums);
+  size_t ob = size_t(net.output_bucket(pieces));
+  hidden_layer(h1, net.w2q.data() + ob * h2 * width, width, h2, sums);
   const float scale = 1.0f / (float(QA) * net.qb);
-  float out = net.b3;
-  for (int j = 0; j < h2; j++) out += net.w3[j] * std::clamp(float(sums[j]) * scale + net.b2[j], 0.0f, 1.0f);
+  const float* b2 = net.b2.data() + ob * h2;
+  const float* w3 = net.w3.data() + ob * h2;
+  float out = net.b3[ob];
+  for (int j = 0; j < h2; j++) out += w3[j] * std::clamp(float(sums[j]) * scale + b2[j], 0.0f, 1.0f);
   return out;
 }
 
-int evaluate(const Network& net, const Accumulator& acc, int side_to_move) {
-  int cp = int(logit(net, acc, side_to_move) * net.cp_per_logit);
+int evaluate(const Network& net, const Accumulator& acc, int side_to_move, int pieces) {
+  int cp = int(logit(net, acc, side_to_move, pieces) * net.cp_per_logit);
   return std::clamp(cp, -5000, 5000);
 }
 
@@ -288,19 +300,21 @@ void refresh_float(const Network& net, const Position& pos, FloatAccumulator& ac
   }
 }
 
-float logit_float(const Network& net, const FloatAccumulator& acc, int side_to_move) {
+float logit_float(const Network& net, const FloatAccumulator& acc, int side_to_move, int pieces) {
   int n = net.hidden1;
   float h1[2 * MAX_HIDDEN1];
   for (int i = 0; i < n; i++) h1[i] = std::clamp(acc.v[side_to_move][i], 0.0f, 1.0f);
   if (net.perspectives() == 2)
     for (int i = 0; i < n; i++) h1[n + i] = std::clamp(acc.v[side_to_move ^ 1][i], 0.0f, 1.0f);
   int width = net.perspectives() * n;
-  float out = net.b3;
+  size_t ob = size_t(net.output_bucket(pieces));
+  float out = net.b3[ob];
   for (int j = 0; j < net.hidden2; j++) {
-    const float* row = &net.w2[size_t(j) * width];
-    float s = net.b2[j];
+    size_t k = ob * net.hidden2 + j;
+    const float* row = &net.w2[k * width];
+    float s = net.b2[k];
     for (int i = 0; i < width; i++) s += row[i] * h1[i];
-    out += net.w3[j] * std::clamp(s, 0.0f, 1.0f);
+    out += net.w3[k] * std::clamp(s, 0.0f, 1.0f);
   }
   return out;
 }

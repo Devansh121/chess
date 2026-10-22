@@ -282,8 +282,9 @@ int main(int argc, char** argv) {
         nnue::FloatAccumulator ref;
         nnue::refresh_float(network, pos, ref);
         char buf[128];
-        std::snprintf(buf, sizeof(buf), " network %d logit %.6f float %.6f", nnue::evaluate(network, acc, pos.side),
-                      nnue::logit(network, acc, pos.side), nnue::logit_float(network, ref, pos.side));
+        std::snprintf(buf, sizeof(buf), " network %d logit %.6f float %.6f", nnue::evaluate(network, acc, pos.side, popcount(pos.all())),
+                      nnue::logit(network, acc, pos.side, popcount(pos.all())),
+                      nnue::logit_float(network, ref, pos.side, popcount(pos.all())));
         line_out += buf;
       }
       send(line_out);

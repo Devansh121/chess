@@ -123,7 +123,38 @@ class ValueNetV3(nn.Module):
     return w
 
 
-ARCHS = {"v1": ValueNet, "v2": ValueNetV2, "v3": ValueNetV3}
+OUTPUT_BUCKETS = 8
+
+
+def output_bucket(x, num_output_buckets=OUTPUT_BUCKETS):
+  """Output-layer bucket by piece count (2..32 pieces -> 0..num_output_buckets - 1); x is padded with NUM_FEATURES."""
+  pieces = (x != NUM_FEATURES).sum(dim=1)
+  return torch.clamp((pieces - 2) * num_output_buckets // 32, 0, num_output_buckets - 1)
+
+
+class ValueNetV4(ValueNetV3):
+  """v3 with output buckets: one second and third layer per piece-count bucket, so openings, middlegames
+  and endgames each get their own evaluation head on the shared accumulators."""
+
+  def __init__(self, hidden1=HIDDEN1, hidden2=HIDDEN2, num_buckets=NUM_BUCKETS, num_output_buckets=OUTPUT_BUCKETS):
+    super().__init__(hidden1, hidden2, num_buckets)
+    self.hidden2 = hidden2
+    self.num_output_buckets = num_output_buckets
+    self.l2 = nn.Linear(2 * hidden1, num_output_buckets * hidden2)
+    self.out_weight = nn.Parameter(torch.empty(num_output_buckets, hidden2))
+    self.out_bias = nn.Parameter(torch.zeros(num_output_buckets))
+    nn.init.uniform_(self.out_weight, -(hidden2**-0.5), hidden2**-0.5)
+    del self.out
+
+  def forward(self, x):
+    h = torch.cat([self.accumulate(x), self.accumulate(other_perspective(x))], dim=1)
+    ob = output_bucket(x, self.num_output_buckets)
+    rows = torch.arange(len(x), device=x.device)
+    h2 = torch.clamp(self.l2(h).view(len(x), self.num_output_buckets, self.hidden2)[rows, ob], 0.0, 1.0)
+    return (h2 * self.out_weight[ob]).sum(dim=1) + self.out_bias[ob]
+
+
+ARCHS = {"v1": ValueNet, "v2": ValueNetV2, "v3": ValueNetV3, "v4": ValueNetV4}
 
 
 def to_model_input(x_uint16):
