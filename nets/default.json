@@ -1,11 +1,12 @@
 {
   "args": {
-    "name": "v3h384-300m-sp4",
+    "name": "v3h384-sp45",
     "data": [
       "data/processed",
       "data/processed2",
       "data/processed3",
-      "data/processed-sp4:4"
+      "data/processed-sp4:3",
+      "data/processed-sp5:4"
     ],
     "init": null,
     "out": "nets",
@@ -23,7 +24,7 @@
     "val_extra": [
       "data/processed-sp2b",
       "data/processed-sp3",
-      "data/processed-sp4"
+      "data/processed-sp5"
     ]
   },
   "device": "cuda",
@@ -31,124 +32,124 @@
   "epochs": [
     {
       "epoch": 1,
-      "train_mse": 0.02519638037965401,
-      "val_mse": 0.026646014535760515,
+      "train_mse": 0.022698312740672,
+      "val_mse": 0.033349590287631396,
       "extra_val_mse": {
-        "data/processed-sp2b": 0.016303454758752813,
-        "data/processed-sp3": 0.015903915996067674,
-        "data/processed-sp4": 0.013485893264606284
+        "data/processed-sp2b": 0.011792233821300001,
+        "data/processed-sp3": 0.010900344644910662,
+        "data/processed-sp5": 0.010243661837379826
       },
-      "positions": 354955566,
-      "secs": 895.1653838157654
+      "positions": 429679137,
+      "secs": 974.7292823791504
     },
     {
       "epoch": 2,
-      "train_mse": 0.02284805522747764,
-      "val_mse": 0.025594180527803097,
+      "train_mse": 0.02066491438626974,
+      "val_mse": 0.025699987432017336,
       "extra_val_mse": {
-        "data/processed-sp2b": 0.016118026790371734,
-        "data/processed-sp3": 0.015425510177306721,
-        "data/processed-sp4": 0.013167668725251803
+        "data/processed-sp2b": 0.014865090185643394,
+        "data/processed-sp3": 0.015006333178395847,
+        "data/processed-sp5": 0.013143115561241266
       },
-      "positions": 354955566,
-      "secs": 866.9854185581207
+      "positions": 429679137,
+      "secs": 960.724972486496
     },
     {
       "epoch": 3,
-      "train_mse": 0.02223507118813237,
-      "val_mse": 0.024934110366961273,
+      "train_mse": 0.020142006246103135,
+      "val_mse": 0.025846326253627518,
       "extra_val_mse": {
-        "data/processed-sp2b": 0.015440307657403944,
-        "data/processed-sp3": 0.014849521448519901,
-        "data/processed-sp4": 0.012448969313517123
+        "data/processed-sp2b": 0.013699813698664513,
+        "data/processed-sp3": 0.013158344087146577,
+        "data/processed-sp5": 0.012133611188894479
       },
-      "positions": 354955566,
-      "secs": 842.2335495948792
+      "positions": 429679137,
+      "secs": 958.7948176860809
     },
     {
       "epoch": 4,
-      "train_mse": 0.021817889488520033,
-      "val_mse": 0.02490338586662738,
+      "train_mse": 0.01977092591199191,
+      "val_mse": 0.024352781520654006,
       "extra_val_mse": {
-        "data/processed-sp2b": 0.013684987236373167,
-        "data/processed-sp3": 0.013455987241886751,
-        "data/processed-sp4": 0.011837114000430986
+        "data/processed-sp2b": 0.01495846941684226,
+        "data/processed-sp3": 0.014243405609062952,
+        "data/processed-sp5": 0.012763658027303646
       },
-      "positions": 354955566,
-      "secs": 845.7395942211151
+      "positions": 429679137,
+      "secs": 958.6482653617859
     },
     {
       "epoch": 5,
-      "train_mse": 0.021461430121236278,
-      "val_mse": 0.024417688032167553,
+      "train_mse": 0.019519024398154016,
+      "val_mse": 0.028946100117565692,
       "extra_val_mse": {
-        "data/processed-sp2b": 0.013276745088017173,
-        "data/processed-sp3": 0.012950211352223972,
-        "data/processed-sp4": 0.01148043162338877
+        "data/processed-sp2b": 0.010808785930979574,
+        "data/processed-sp3": 0.010308399378696334,
+        "data/processed-sp5": 0.00943952748382719
       },
-      "positions": 354955566,
-      "secs": 860.8699924945831
+      "positions": 429679137,
+      "secs": 957.6379373073578
     },
     {
       "epoch": 6,
-      "train_mse": 0.021174247396762935,
-      "val_mse": 0.023754281975331724,
+      "train_mse": 0.01925772662176127,
+      "val_mse": 0.027661586448711476,
       "extra_val_mse": {
-        "data/processed-sp2b": 0.013755460689284108,
-        "data/processed-sp3": 0.013221346010989914,
-        "data/processed-sp4": 0.011295511902120635
+        "data/processed-sp2b": 0.011140829648077161,
+        "data/processed-sp3": 0.010377701410039776,
+        "data/processed-sp5": 0.009391936211733325
       },
-      "positions": 354955566,
-      "secs": 809.7843956947327
+      "positions": 429679137,
+      "secs": 962.0969595909119
     },
     {
       "epoch": 7,
-      "train_mse": 0.020921816805605786,
-      "val_mse": 0.02346454292037841,
+      "train_mse": 0.01902454156081392,
+      "val_mse": 0.023431403025826133,
       "extra_val_mse": {
-        "data/processed-sp2b": 0.01369685276298766,
-        "data/processed-sp3": 0.013221684699064899,
-        "data/processed-sp4": 0.011311387441596007
+        "data/processed-sp2b": 0.013289525538728758,
+        "data/processed-sp3": 0.01275825415604052,
+        "data/processed-sp5": 0.01134948193180297
       },
-      "positions": 354955566,
-      "secs": 833.4722497463226
+      "positions": 429679137,
+      "secs": 957.1632189750671
     },
     {
       "epoch": 8,
-      "train_mse": 0.0207027215746531,
-      "val_mse": 0.022838656082667726,
+      "train_mse": 0.018880539930967943,
+      "val_mse": 0.023102965795529187,
       "extra_val_mse": {
-        "data/processed-sp2b": 0.013816089491882927,
-        "data/processed-sp3": 0.012915960565693494,
-        "data/processed-sp4": 0.011092871266045893
+        "data/processed-sp2b": 0.013128376572623819,
+        "data/processed-sp3": 0.01254062117817246,
+        "data/processed-sp5": 0.011049184716173457
       },
-      "positions": 354955566,
-      "secs": 809.2885029315948
+      "positions": 429679137,
+      "secs": 954.2811918258667
     },
     {
       "epoch": 9,
-      "train_mse": 0.02057871816057566,
-      "val_mse": 0.022909942797323755,
+      "train_mse": 0.018767866124156825,
+      "val_mse": 0.025366123970371687,
       "extra_val_mse": {
-        "data/processed-sp2b": 0.012890235738337447,
-        "data/processed-sp3": 0.012273086459571965,
-        "data/processed-sp4": 0.010359294112223732
+        "data/processed-sp2b": 0.010512167873839193,
+        "data/processed-sp3": 0.009827606615406914,
+        "data/processed-sp5": 0.00903178743082778
       },
-      "positions": 354955566,
-      "secs": 861.696284532547
+      "positions": 429679137,
+      "secs": 956.2854719161987
     },
     {
       "epoch": 10,
-      "train_mse": 0.020513352229627014,
-      "val_mse": 0.023450419732114338,
+      "train_mse": 0.018760852705732158,
+      "val_mse": 0.022874324443350236,
       "extra_val_mse": {
-        "data/processed-sp2b": 0.01172462997922472,
-        "data/processed-sp3": 0.011095075008865987,
-        "data/processed-sp4": 0.009396521611993473
+        "data/processed-sp2b": 0.012080263154155313,
+        "data/processed-sp3": 0.01113874624716636,
+        "data/processed-sp5": 0.010003251205511801
       },
-      "positions": 354955566,
-      "secs": 814.5308096408844
+      "positions": 429679137,
+      "secs": 961.5876066684723
     }
   ],
-  "best_val_mse": 0.022838656082667726
+  "best_val_mse": 0.022874324443350236
 }

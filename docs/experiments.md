@@ -128,3 +128,19 @@ The Lichess loss got worse while the self-play ones improved by 10-13%, and the 
 sets. Earlier self-play rounds used a few million Stockfish depth-10 to 14 labels; many more positions scored
 by the engine's own search, blended with the result, worked much better. The Lichess-best checkpoint
 (`NAME.pt`) would have been epoch 8, so the last epoch was taken from `NAME.ckpt`.
+
+## Round 7: a second self-play round from the stronger engine
+
+`chess-engine datagen` with the #70 engine (PGO, v3h384-300m-sp4), same settings as round 6: ~22.3M more
+positions (stopped by the disk guard). Training: v3, 384 wide, 10 epochs from scratch on the 300M Lichess
+positions + round 6 x3 + round 7 x4 (~30% self-play per epoch). Every epoch's weights were kept, since the
+self-play validation losses swing between epochs.
+
+| Name | Self-play 2b val | Self-play 3 val | Match vs #70's net (800 games, 100k nodes) |
+|---|---|---|---|
+| #70 default | 0.01172 | 0.01110 | |
+| **v3h384-sp45, epoch 9** | **0.01051** | **0.00983** | **+38 ± 22** (+363 =161 -276) |
+| v3h384-sp45, epoch 10 | 0.01208 | 0.01114 | -14 ± 22 (+312 =143 -345) |
+
+The self-play validation sets picked the right epoch again. These nets had a few first-layer weights past the
+engine's int16 accumulator bound (max 8.5 vs 7.8); `export_net.py` now clamps them (1 of 1.18M here).
