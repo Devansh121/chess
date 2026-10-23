@@ -128,3 +128,36 @@ The Lichess loss got worse while the self-play ones improved by 10-13%, and the 
 sets. Earlier self-play rounds used a few million Stockfish depth-10 to 14 labels; many more positions scored
 by the engine's own search, blended with the result, worked much better. The Lichess-best checkpoint
 (`NAME.pt`) would have been epoch 8, so the last epoch was taken from `NAME.ckpt`.
+
+## Round 7: a second self-play round from the stronger engine
+
+`chess-engine datagen` with the #70 engine (PGO, v3h384-300m-sp4), same settings as round 6: ~22.3M more
+positions (stopped by the disk guard). Training: v3, 384 wide, 10 epochs from scratch on the 300M Lichess
+positions + round 6 x3 + round 7 x4 (~30% self-play per epoch). Every epoch's weights were kept, since the
+self-play validation losses swing between epochs.
+
+| Name | Self-play 2b val | Self-play 3 val | Match vs #70's net (800 games, 100k nodes) |
+|---|---|---|---|
+| #70 default | 0.01172 | 0.01110 | |
+| **v3h384-sp45, epoch 9** | **0.01051** | **0.00983** | **+38 ± 22** (+363 =161 -276) |
+| v3h384-sp45, epoch 10 | 0.01208 | 0.01114 | -14 ± 22 (+312 =143 -345) |
+
+The self-play validation sets picked the right epoch again. These nets had a few first-layer weights past the
+engine's int16 accumulator bound (max 8.5 vs 7.8); `export_net.py` now clamps them (1 of 1.18M here).
+
+## Round 8: the plateau after #71
+
+All matches against #71's net with #71's engine, 800 games, 100k nodes, `--random-plies 4`, unless noted.
+
+| Change | Training | Best self-play val (2b / 3) | Result |
+|---|---|---|---|
+| Round 3 self-play (16.7M from #71's engine) | 300M Lichess + rounds 1-3 (~35% self-play) | 0.01013 / 0.00984 (epoch 7) | +3 ± 21 (epoch 10: -10 ± 21) |
+| Half the Lichess data | 150M Lichess + rounds 1-3 (~50% self-play) | 0.01066 / 0.01013 (epoch 8) | -5 ± 21 |
+| 512 wide | same as above | 0.01008 / 0.00990 (epoch 8) | +10 ± 22 at equal nodes, ~15% fewer nodes/s |
+| Round 4 self-play (23.4M) | 150M Lichess + rounds 1-4, newest weighted most | 0.01042 / - (epoch 9) | +9 ± 22 |
+| SPSA retune for #71's net | 2,000 iterations, 40k nodes | | +2 ± 21 (moves were small) |
+| Output buckets (arch 4, 8 heads by piece count) | #71's exact recipe | 0.01065 / 0.01025 (epoch 9) | +0 ± 21 |
+
+More self-play data from the same 5k-node searches, a wider first layer, output buckets and a search retune all
+land within noise of #71. The self-play validation sets still rank epochs within a run, but they stopped
+predicting gains across runs. Next: labels from deeper searches (20k nodes per move).

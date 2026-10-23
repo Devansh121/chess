@@ -24,6 +24,7 @@ longer time controls, so treat absolute numbers as approximate and comparisons a
 | + PGO build (#63), king-bucketed network (#64), LMP/SEE pruning (#65), null-move/razoring (#67) | vs Stockfish 3000, 160 games | +16 =71 -73 (-129 ± 41) | **~2870** |
 | + SPSA-tuned search margins (#68) | vs Stockfish 3000, 320 games | +40 =125 -155 (-131 ± 30) | **~2869** |
 | + network trained with own self-play data (#70; +69 ± 22 vs #64's net) | vs Stockfish 3000, 320 games | +48 =155 -117 (-76 ± 27) | **~2924** |
+| + second self-play round (#71; +38 ± 22 vs #70's net) | vs Stockfish 3000, 320 games | +79 =168 -73 (+7 ± 26) | **~3007** |
 
 ## Search changes (C++)
 

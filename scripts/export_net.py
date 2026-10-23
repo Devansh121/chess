@@ -35,6 +35,13 @@ def write_binary(path, sd, arch, cp_scale, hidden1):
     w1[-1] = 0  # padding row
   else:
     w1 = sd["inputs.weight"].numpy().astype("<f4")
+  # The engine's int16 accumulator check assumes up to 32 active features all at the largest weight:
+  # (max|b1| + 32 * max|w1|) * 127 <= 32000 (cpp/src/nnue.cpp). Clamp the rare outliers past that bound.
+  limit = (32000 / 127 - float(np.abs(sd["input_bias"].numpy()).max())) / 32 * 0.999
+  clipped = int((np.abs(w1) > limit).sum())
+  if clipped:
+    w1 = np.clip(w1, -limit, limit)
+    print(f"clamped {clipped} of {w1.size:,} first-layer weights to +/-{limit:.3f}", file=sys.stderr)
   w2 = sd["l2.weight"].numpy().astype("<f4")
   inputs, hidden1 = w1.shape
   hidden2 = w2.shape[0]
